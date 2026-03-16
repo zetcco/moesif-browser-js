@@ -156,7 +156,8 @@ export default function () {
 
       // specify domains to be considered for cross domain tracking.
       ops.enableCrossDomainTracking = options['enableCrossDomainTracking'] || false;
-      ops.crossDomainTargets = options['crossDomainTargets'] || [];
+      // crossDomainTargets: array of domains to decorate, null to decorate all domains, [] or undefined to decorate none
+      ops.crossDomainTargets = Object.hasOwn(options, 'crossDomainTargets') ? options['crossDomainTargets'] : [];
       ops.crossDomainTrackingParameterName = ops.enableCrossDomainTracking ? (options['crossDomainTrackingParameterName'] || '__mt') : null;
 
       this.requestBatchers = {};
@@ -373,20 +374,26 @@ export default function () {
       if (this._options.enableCrossDomainTracking) {
         console.log('enabling cross domain tracking');
 
-        if (this._options.crossDomainTargets.length > 0) {
-          console.log('decorating links for cross domain tracking');
-          this._stopCrossDomainTracking = decorateLinksForCrossDomainTracking(
-            this._options.crossDomainTargets,
-            this._options.crossDomainTrackingParameterName,
-            this._anonymousId
-          );
-        } else {
-          console.warn('cross domain tracking is enabled for all domains and hyperlinks');
+        var targets = this._options.crossDomainTargets;
+
+        // null means decorate all domains (explicit opt-in)
+        if (targets === null) {
+          console.log('cross domain tracking is enabled for ALL domains and hyperlinks');
           this._stopCrossDomainTracking = decorateLinksForCrossDomainTracking(
             null,
             this._options.crossDomainTrackingParameterName,
             this._anonymousId
           );
+        } else if (Array.isArray(targets) && targets.length > 0) {
+          console.log('decorating links for cross domain tracking on specified domains: ' + targets.join(', '));
+          this._stopCrossDomainTracking = decorateLinksForCrossDomainTracking(
+            targets,
+            this._options.crossDomainTrackingParameterName,
+            this._anonymousId
+          );
+        } else {
+          console.log('cross domain tracking is enabled but no target domains specified - no links will be decorated');
+          // Don't set up event listeners if no targets specified
         }
       }
 

@@ -108,6 +108,8 @@ export default function decorateLinks(trackingDomains, trackingParamName, tracki
   myenv.addEventListener('auxclick', linkClickHandler, true);
   // right-click (for copy link address)
   myenv.addEventListener('contextmenu', linkClickHandler, true);
+  // touch events for mobile devices
+  myenv.addEventListener('touchstart', linkClickHandler, true);
 
   // Form submissions
   myenv.addEventListener('submit', formSubmitHandler, true);
@@ -118,6 +120,7 @@ export default function decorateLinks(trackingDomains, trackingParamName, tracki
     myenv.removeEventListener('click', linkClickHandler, true);
     myenv.removeEventListener('auxclick', linkClickHandler, true);
     myenv.removeEventListener('contextmenu', linkClickHandler, true);
+    myenv.removeEventListener('touchstart', linkClickHandler, true);
     myenv.removeEventListener('submit', formSubmitHandler, true);
   };
 }
