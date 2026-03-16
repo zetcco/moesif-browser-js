@@ -405,7 +405,7 @@ export default function () {
     'cdtUrlDecorator': function (url, overrideDomains = false) {
       if (!url) return url;
       const decoratableDomains = overrideDomains ? null : this._options.crossDomainTargets;
-      return cdtUrlDecorator(url, decoratableDomains, this._options.crossDomainTrackingParameterName, this._anonymousId);
+      return cdtUrlDecorator(url, decoratableDomains, this._options.crossDomainTrackingParameterName, this._anonymousId, window);
     },
      'useWeb3': function (passedInWeb3) {
       var _self = this;

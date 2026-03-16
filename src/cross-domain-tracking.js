@@ -8,10 +8,27 @@ function isTargetDomain(urlObj, decoratableDomains) {
   });
 }
 
-export function decorator(url, decoratableDomains, trackingParam, trackingValue) {
+function isSameOrigin(urlObj, env) {
+  const myenv = env || window || self;
+  try {
+    return urlObj.origin === myenv.location.origin;
+  } catch (e) {
+    // Fallback for older browsers
+    return urlObj.hostname === myenv.location.hostname &&
+           urlObj.protocol === myenv.location.protocol &&
+           urlObj.port === myenv.location.port;
+  }
+}
+
+export function decorator(url, decoratableDomains, trackingParam, trackingValue, env) {
   if (!url) return url; // Added check for empty/undefined URLs
   try {
     const urlObj = new URL(url, window.location.origin);
+
+    // Skip same-origin links to avoid unnecessary overhead and exposure
+    if (isSameOrigin(urlObj, env)) {
+      return url;
+    }
 
     // Check if the hostname of the URL matches any of the decoratable domains
     const isTarget = isTargetDomain(urlObj, decoratableDomains);
@@ -37,7 +54,8 @@ export default function decorateLinks(trackingDomains, trackingParamName, tracki
         link.href,
         trackingDomains,
         trackingParamName,
-        trackingParamValue
+        trackingParamValue,
+        myenv
       );
     }
   };
@@ -47,10 +65,26 @@ export default function decorateLinks(trackingDomains, trackingParamName, tracki
     const form = e.target;
     try {
       const actionUrl = new URL(form.action, myenv.location.origin);
+
+      // Skip same-origin forms
+      if (isSameOrigin(actionUrl, myenv)) {
+        return;
+      }
+
       const isTarget = isTargetDomain(actionUrl, trackingDomains);
 
       if (isTarget) {
-        // Avoid duplicates
+        // For POST forms, add the tracking parameter to the action URL query string
+        // This ensures the parameter is passed even if the POST body is lost in redirects
+        const method = (form.method || 'get').toLowerCase();
+        if (method === 'post') {
+          actionUrl.searchParams.set(trackingParamName, trackingParamValue);
+          form.action = actionUrl.href;
+        }
+
+        // Also add as hidden input for redundancy (works for both GET and POST)
+        // For GET forms, this will be appended to the query string
+        // For POST forms, this provides a fallback in the body
         let trackingInput = form.querySelector(`input[name="${trackingParamName}"]`);
 
         if (!trackingInput) {
@@ -101,5 +135,32 @@ export function getCrossDomainTrackingParamValue(paramName) {
     // URLSearchParams might not be available in older browsers
     // or window.location might not be accessible
     return null;
+  }
+}
+
+// Remove the tracking parameter from the URL to prevent pollution
+// Call this after the parameter has been read and persisted
+export function cleanUrlParameter(paramName) {
+  try {
+    if (!window || !window.location || !window.history || !window.history.replaceState) {
+      return; // Browser doesn't support history API
+    }
+
+    const urlParams = new URLSearchParams(window.location.search);
+    if (!urlParams.has(paramName)) {
+      return; // Parameter not present, nothing to clean
+    }
+
+    // Remove the parameter
+    urlParams.delete(paramName);
+
+    // Construct the new URL
+    const newSearch = urlParams.toString();
+    const newUrl = window.location.pathname + (newSearch ? '?' + newSearch : '') + window.location.hash;
+
+    // Replace the URL without reloading the page
+    window.history.replaceState(null, '', newUrl);
+  } catch (err) {
+    // Silently fail - URL cleaning is not critical
   }
 }

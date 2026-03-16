@@ -1,6 +1,6 @@
 import { _, console } from './utils';
 import { getFromPersistence, STORAGE_CONSTANTS } from './persistence';
-import { getCrossDomainTrackingParamValue } from './cross-domain-tracking';
+import { getCrossDomainTrackingParamValue, cleanUrlParameter } from './cross-domain-tracking';
 
 // Validate anonymous ID format
 // Should be hex characters separated by dashes, reasonable length
@@ -40,10 +40,14 @@ function getAnonymousId(persist, opt, cdtParamName) {
       var anonIdFromCrossDomainTracking = getCrossDomainTrackingParamValue(cdtParamName);
       if (anonIdFromCrossDomainTracking && isValidAnonymousId(anonIdFromCrossDomainTracking)) {
         persist(STORAGE_CONSTANTS.STORED_ANONYMOUS_ID, anonIdFromCrossDomainTracking);
+        // Clean the URL parameter after persisting to prevent pollution
+        cleanUrlParameter(cdtParamName);
         return anonIdFromCrossDomainTracking;
       } else if (anonIdFromCrossDomainTracking) {
         // Invalid format detected
         console.error('Invalid anonymous ID format from URL parameter, ignoring');
+        // Clean the invalid parameter from URL
+        cleanUrlParameter(cdtParamName);
       }
     } catch (err) {
       console.error('Error reading cross-domain tracking parameter: ' + err.message);
