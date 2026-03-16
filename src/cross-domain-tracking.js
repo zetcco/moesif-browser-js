@@ -74,27 +74,25 @@ export default function decorateLinks(trackingDomains, trackingParamName, tracki
       const isTarget = isTargetDomain(actionUrl, trackingDomains);
 
       if (isTarget) {
-        // For POST forms, add the tracking parameter to the action URL query string
-        // This ensures the parameter is passed even if the POST body is lost in redirects
         const method = (form.method || 'get').toLowerCase();
-        if (method === 'post') {
-          actionUrl.searchParams.set(trackingParamName, trackingParamValue);
-          form.action = actionUrl.href;
+
+        // Only decorate GET forms automatically
+        // POST forms are skipped to avoid breaking server-side logic (CSRF, routing, etc.)
+        // POST body can't be read by JavaScript on the destination page anyway
+        // Users can manually use cdtUrlDecorator() for form.action if needed
+        if (method === 'get') {
+          // Add as hidden input which will be appended to the query string
+          let trackingInput = form.querySelector(`input[name="${trackingParamName}"]`);
+
+          if (!trackingInput) {
+            trackingInput = myenv.document.createElement('input');
+            trackingInput.type = 'hidden';
+            trackingInput.name = trackingParamName;
+            form.appendChild(trackingInput);
+          }
+
+          trackingInput.value = trackingParamValue;
         }
-
-        // Also add as hidden input for redundancy (works for both GET and POST)
-        // For GET forms, this will be appended to the query string
-        // For POST forms, this provides a fallback in the body
-        let trackingInput = form.querySelector(`input[name="${trackingParamName}"]`);
-
-        if (!trackingInput) {
-          trackingInput = myenv.document.createElement('input');
-          trackingInput.type = 'hidden';
-          trackingInput.name = trackingParamName;
-          form.appendChild(trackingInput);
-        }
-
-        trackingInput.value = trackingParamValue;
       }
     } catch (err) {
       // skip decoration
