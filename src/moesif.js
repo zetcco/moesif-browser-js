@@ -375,13 +375,18 @@ export default function () {
 
         if (this._options.crossDomainTargets.length > 0) {
           console.log('decorating links for cross domain tracking');
-          decorateLinksForCrossDomainTracking(
+          this._stopCrossDomainTracking = decorateLinksForCrossDomainTracking(
             this._options.crossDomainTargets,
             this._options.crossDomainTrackingParameterName,
             this._anonymousId
           );
         } else {
           console.warn('cross domain tracking is enabled for all domains and hyperlinks');
+          this._stopCrossDomainTracking = decorateLinksForCrossDomainTracking(
+            null,
+            this._options.crossDomainTrackingParameterName,
+            this._anonymousId
+          );
         }
       }
 
@@ -674,6 +679,10 @@ export default function () {
       if (this._stopFetchRecording) {
         this._stopFetchRecording();
         this._stopFetchRecording = null;
+      }
+      if (this._stopCrossDomainTracking) {
+        this._stopCrossDomainTracking();
+        this._stopCrossDomainTracking = null;
       }
     },
     'clearCookies': function () {

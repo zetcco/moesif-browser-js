@@ -29,8 +29,8 @@ export function decorator(url, decoratableDomains, trackingParam, trackingValue)
 export default function decorateLinks(trackingDomains, trackingParamName, trackingParamValue, recorder, env) {
   const myenv = env || window || self;
 
-  // Intercept link clicks
-  myenv.addEventListener('mousedown', (e) => {
+  // Link click handler - handles various click events
+  const linkClickHandler = (e) => {
     const link = e.target.closest('a');
     if (link && link.href) {
       link.href = decorator(
@@ -40,10 +40,10 @@ export default function decorateLinks(trackingDomains, trackingParamName, tracki
         trackingParamValue
       );
     }
-  }, true);
+  };
 
-  // Intercept form submissions
-  myenv.addEventListener('submit', (e) => {
+  // Form submission handler
+  const formSubmitHandler = (e) => {
     const form = e.target;
     try {
       const actionUrl = new URL(form.action, myenv.location.origin);
@@ -65,11 +65,41 @@ export default function decorateLinks(trackingDomains, trackingParamName, tracki
     } catch (err) {
       // skip decoration
     }
-  }, true);
+  };
 
+  // Add event listeners for various interaction types
+  // regular clicks
+  myenv.addEventListener('mousedown', linkClickHandler, true);
+  // keyboard navigation (Tab + Enter)
+  myenv.addEventListener('click', linkClickHandler, true);
+  // middle-click and other auxiliary button clicks
+  myenv.addEventListener('auxclick', linkClickHandler, true);
+  // right-click (for copy link address)
+  myenv.addEventListener('contextmenu', linkClickHandler, true);
+
+  // Form submissions
+  myenv.addEventListener('submit', formSubmitHandler, true);
+
+  // Return cleanup function to remove event listeners
+  return function cleanup() {
+    myenv.removeEventListener('mousedown', linkClickHandler, true);
+    myenv.removeEventListener('click', linkClickHandler, true);
+    myenv.removeEventListener('auxclick', linkClickHandler, true);
+    myenv.removeEventListener('contextmenu', linkClickHandler, true);
+    myenv.removeEventListener('submit', formSubmitHandler, true);
+  };
 }
 
 export function getCrossDomainTrackingParamValue(paramName) {
-  const urlParams = new URLSearchParams(window.location.search);
-  return urlParams.get(paramName);
+  try {
+    if (!window || !window.location || !window.location.search) {
+      return null;
+    }
+    const urlParams = new URLSearchParams(window.location.search);
+    return urlParams.get(paramName);
+  } catch (err) {
+    // URLSearchParams might not be available in older browsers
+    // or window.location might not be accessible
+    return null;
+  }
 }
