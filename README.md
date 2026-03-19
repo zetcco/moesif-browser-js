@@ -179,6 +179,99 @@ Moesif will automatically merge any previous user activity to the real userId, e
 
 By default, Moesif uses both local storage and cookies for redundancy, but you can modify this behavior with the `persistence` options
 
+## Cross-Domain Tracking
+
+By default, anonymous user sessions are scoped to a single domain (including sub-domains). If your product spans multiple domains (e.g., `example.com` and `hello.world.dev`), each domain gets its own independent `anonymousId`, making it impossible to stitch together the full user journey.
+
+**Cross-Domain Tracking (CDT)** is an opt-in feature that passes the `anonymousId` between domains via a URL query parameter. When a user navigates from one domain to another, the SDK appends the current `anonymousId` to outgoing links. Upon arrival at the destination site, the SDK reads the parameter, persists the ID, and removes the parameter from the address bar to keep URLs clean.
+
+> For CDT to work end-to-end, **both** the origin domain and the destination domain must have `enableCrossDomainTracking: true` configured in their `moesif.init()` call.
+
+### Basic setup
+
+```javascript
+moesif.init({
+  applicationId: "Your Publishable Moesif Application Id",
+  enableCrossDomainTracking: true,
+  crossDomainTargets: null,             // null = decorate all cross-domain links
+  // crossDomainTargets: ["site1.com", "site2.com"],  // or restrict to specific domains
+  // crossDomainTrackingParameterName: '__mt',        // optional: customise the query param name (default: __mt)
+});
+```
+
+> **Important:** If `crossDomainTargets` is omitted entirely (i.e. not set), **no** cross-domain links will be decorated. You must explicitly set it to `null` (all domains) or an array of target domains to activate URL decoration. This is intentional — it prevents unexpected behavior from silent defaults.
+
+### Configuration options
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `enableCrossDomainTracking` | boolean | `false` | Enables or disables Cross-Domain Tracking. |
+| `crossDomainTargets` | `null` \| `string[]` | *(unset — no decoration)* | `null` decorates all cross-domain links. An array restricts decoration to only those domains. If the option is not set, no links are decorated. |
+| `crossDomainTrackingParameterName` | string | `__mt` | The URL query parameter name used to carry the `anonymousId`. |
+
+### Automatically intercepted navigations
+
+When CDT is enabled, the SDK automatically decorates outgoing URLs for the following navigation methods:
+
+- **Anchor tags** (`<a href="...">`) — standard clicks, middle-clicks, touch events, and "Copy Link Address" via the context menu.
+- **Form submissions** — GET method only. POST form actions are not decorated.
+
+### Manual URL decoration
+
+Some navigation methods cannot be intercepted automatically (e.g., `window.location.href`, `window.location.assign()`, `window.location.replace()`, `window.open()`, and the Navigation API). For these cases, the SDK exposes a helper:
+
+```javascript
+moesif.cdtUrlDecorator(targetURL, overrideCDTTargets = false)
+```
+
+This function appends the current `anonymousId` and the configured parameter name to the given URL. If the URL is already decorated, the existing parameter value is updated. If the target domain is not in `crossDomainTargets`, the URL is returned unchanged — unless `overrideCDTTargets` is set to `true`.
+
+**Example usage:**
+
+```javascript
+// Anchor tags are handled automatically. For JS-based redirects, wrap the URL manually:
+
+// window.location.href
+window.location.href = moesif.cdtUrlDecorator('https://console.bijira.dev/signup');
+
+// window.location.assign
+window.location.assign(moesif.cdtUrlDecorator('https://console.bijira.dev/signup'));
+
+// window.location.replace
+window.location.replace(moesif.cdtUrlDecorator('https://console.bijira.dev/signup'));
+
+// window.open
+window.open(moesif.cdtUrlDecorator('https://console.bijira.dev/signup'));
+
+// Navigation API
+navigation.navigate(moesif.cdtUrlDecorator('https://console.bijira.dev/signup'));
+
+// Force-decorate a URL regardless of crossDomainTargets
+const url = moesif.cdtUrlDecorator('https://other-domain.com/page', true);
+```
+
+A convenience wrapper pattern if `moesif` may not yet be initialised:
+
+```javascript
+function decorateMoesifCdtUrl(url) {
+  if (moesif) {
+    return moesif.cdtUrlDecorator(url);
+  }
+  return url;
+}
+```
+
+### How it works
+
+1. User visits `site-a.com` — the SDK generates and stores an `anonymousId`.
+2. User clicks a link to `site-b.com` — the SDK appends `?__mt=<anonymousId>` to the URL.
+3. User lands on `site-b.com` — the SDK reads `__mt`, persists the same `anonymousId`, and removes the parameter from the address bar.
+4. Both sites now share the same `anonymousId`, so all actions across both domains are stitched into one continuous user journey in Moesif.
+
+> Same-domain links are never decorated — URL decoration only occurs when the destination is a different domain than the current page.
+
+---
+
 ## List of Methods on the `moesif` Object
 
 #### init, (obj) => null
@@ -277,6 +370,19 @@ However, you can call `stop` directly if you want more control. Call `start` aga
 moesif.stop()
 ```
 
+#### cdtUrlDecorator, (string, boolean) => string
+
+Manually decorates a URL with the current `anonymousId` for use with navigation methods that cannot be intercepted automatically (e.g., `window.location.href`, `window.open()`). Requires `enableCrossDomainTracking: true` in `init()`.
+
+The second argument `overrideCDTTargets` (default `false`) forces decoration even if the target domain is not in `crossDomainTargets`.
+
+Returns the decorated URL as a string. If the target domain is not allowed and `overrideCDTTargets` is false, the original URL is returned unchanged.
+
+```javascript
+const decoratedUrl = moesif.cdtUrlDecorator('https://console.bijira.dev/signup');
+window.location.href = decoratedUrl;
+```
+
 #### useWeb3, (web3) => boolean
 
 Sets the web3 JSON-RPC to use the web3 object passed in. If no argument is passed
@@ -292,7 +398,25 @@ The `options` is an object that is passed into the SDK's `init` method.
 
 #### applicationId - string, required
 
-This is the collector API key that is obtained from your Moesif account. You should only use your publishable application id in untrusted apps like client-side javascript. Publishable Collector Application Id’s are write-only keys and can be safely used on the client side.
+This is the collector API key that is obtained from your Moesif account. You should only use your publishable application id in untrusted apps like client-side javascript. Publishable Collector Application Id's are write-only keys and can be safely used on the client side.
+
+#### enableCrossDomainTracking, boolean, optional, default false
+
+Enables Cross-Domain Tracking (CDT). When `true`, the SDK will automatically decorate outgoing cross-domain anchor links and GET form submissions with the current `anonymousId`. Use `cdtUrlDecorator()` for JS-based navigations that cannot be intercepted automatically.
+
+Both the origin and destination sites must have this option enabled for tracking to be stitched together correctly.
+
+#### crossDomainTargets, null | string[], optional, default: unset (no decoration)
+
+Controls which destination domains will have their URLs decorated with the `anonymousId`.
+
+- **`null`** — decorate all outgoing cross-domain links.
+- **`["domain-a.com", "domain-b.com"]`** — only decorate links pointing to the listed domains.
+- **Unset (not provided)** — no cross-domain links are decorated. You must explicitly set this option to `null` or a non-empty array to activate URL decoration.
+
+#### crossDomainTrackingParameterName, string, optional, default `__mt`
+
+The URL query parameter name used to carry the `anonymousId` between domains. Override this if `__mt` conflicts with an existing parameter in your application.
 
 #### batchEnabled, boolean, optional, default false.
 
@@ -467,6 +591,14 @@ As an example:
   }
 }
 ```
+
+### Cross-domain tracking not working
+
+- Confirm `enableCrossDomainTracking: true` is set in `moesif.init()` on **both** the origin and destination domains.
+- Confirm `crossDomainTargets` is explicitly set to `null` (all domains) or an array containing the destination domain. If the option is omitted, no URL decoration will occur.
+- For JS-based navigations (`window.location.href`, `window.open()`, etc.), ensure you are wrapping the target URL with `moesif.cdtUrlDecorator()` before navigating. These methods cannot be intercepted automatically.
+- POST form submissions are not decorated. Use a GET form or a JS-based redirect with `cdtUrlDecorator()` instead.
+- Check whether a privacy-focused browser extension is stripping the `__mt` query parameter. You can customise the parameter name via `crossDomainTrackingParameterName` to avoid conflicts with known filter lists.
 
 ## Examples
 
