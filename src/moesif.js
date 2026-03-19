@@ -6,7 +6,6 @@ import { _, console, userAgent, localStorageSupported, JSONStringify, quick_hash
 import patchAjaxWithCapture from './capture';
 import patchWeb3WithCapture from './web3capture';
 import patchFetchWithCapture from './capture-fetch';
-import decorateLinksForCrossDomainTracking, { decorator as cdtUrlDecorator } from './cross-domain-tracking';
 import {
   getCampaignDataFromUrlOrCookie,
   storeCampaignDataIfNeeded,
@@ -379,14 +378,14 @@ export default function () {
         // null means decorate all domains (explicit opt-in)
         if (targets === null) {
           console.log('cross domain tracking is enabled for ALL domains and hyperlinks');
-          this._stopCrossDomainTracking = decorateLinksForCrossDomainTracking(
+          this._stopCrossDomainTracking = _.crossDomainTrackingUtils.decorateLinksForCrossDomainTracking(
             null,
             this._options.crossDomainTrackingParameterName,
             this._anonymousId
           );
         } else if (Array.isArray(targets) && targets.length > 0) {
           console.log('decorating links for cross domain tracking on specified domains: ' + targets.join(', '));
-          this._stopCrossDomainTracking = decorateLinksForCrossDomainTracking(
+          this._stopCrossDomainTracking = _.crossDomainTrackingUtils.decorateLinksForCrossDomainTracking(
             targets,
             this._options.crossDomainTrackingParameterName,
             this._anonymousId
@@ -409,10 +408,15 @@ export default function () {
       return true;
     },
     // Let users decorate their own links with cdt. (ex: for window.open/location, navigation api, etc.)
-    'cdtUrlDecorator': function (url, overrideDomains = false) {
-      if (!url) return url;
-      const decoratableDomains = overrideDomains ? null : this._options.crossDomainTargets;
-      return cdtUrlDecorator(url, decoratableDomains, this._options.crossDomainTrackingParameterName, this._anonymousId, window);
+    'cdtUrlDecorator': function (url, overrideDomains) {
+      if (overrideDomains === undefined) {
+          overrideDomains = false;
+      }
+      if (!url) {
+        return url;
+      }
+      var decoratableDomains = overrideDomains ? null : this._options.crossDomainTargets;
+      return _.crossDomainTrackingUtils.cdtUrlDecorator(url, decoratableDomains, this._options.crossDomainTrackingParameterName, this._anonymousId, window);
     },
      'useWeb3': function (passedInWeb3) {
       var _self = this;

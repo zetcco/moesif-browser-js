@@ -1,15 +1,17 @@
+import { _ } from './utils';
+
 function isTargetDomain(urlObj, decoratableDomains) {
   if (decoratableDomains === null) return true; // Decorate all domains if decoratableDomains is null
   if (Array.isArray(decoratableDomains) && decoratableDomains.length === 0) return false;
-  return decoratableDomains.some(domain => {
-    const target = domain.toLowerCase();
-    const current = urlObj.hostname.toLowerCase();
-    return current === target || current.endsWith('.' + target);
+  return decoratableDomains.some(function(domain) {
+    var target = domain.toLowerCase();
+    var current = urlObj.hostname.toLowerCase();
+    return current === target || current.indexOf('.' + target, current.length - ('.' + target).length) !== -1;
   });
 }
 
 function isSameOrigin(urlObj, env) {
-  const myenv = env || window || self;
+  var myenv = env || window || self;
   try {
     return urlObj.origin === myenv.location.origin;
   } catch (e) {
@@ -20,10 +22,10 @@ function isSameOrigin(urlObj, env) {
   }
 }
 
-export function decorator(url, decoratableDomains, trackingParam, trackingValue, env) {
+function decorator(url, decoratableDomains, trackingParam, trackingValue, env) {
   if (!url) return url; // Added check for empty/undefined URLs
   try {
-    const urlObj = new URL(url, window.location.origin);
+    var urlObj = new URL(url, window.location.origin);
 
     // Skip same-origin links to avoid unnecessary overhead and exposure
     if (isSameOrigin(urlObj, env)) {
@@ -31,7 +33,7 @@ export function decorator(url, decoratableDomains, trackingParam, trackingValue,
     }
 
     // Check if the hostname of the URL matches any of the decoratable domains
-    const isTarget = isTargetDomain(urlObj, decoratableDomains);
+    var isTarget = isTargetDomain(urlObj, decoratableDomains);
 
     if (isTarget) {
       urlObj.searchParams.set(trackingParam, trackingValue);
@@ -44,11 +46,11 @@ export function decorator(url, decoratableDomains, trackingParam, trackingValue,
 }
 
 export default function decorateLinks(trackingDomains, trackingParamName, trackingParamValue, recorder, env) {
-  const myenv = env || window || self;
+  var myenv = env || window || self;
 
   // Link click handler - handles various click events
-  const linkClickHandler = (e) => {
-    const link = e.target.closest('a');
+  var linkClickHandler = function(e) {
+    var link = e.target.closest('a');
     if (link && link.href) {
       link.href = decorator(
         link.href,
@@ -61,20 +63,20 @@ export default function decorateLinks(trackingDomains, trackingParamName, tracki
   };
 
   // Form submission handler
-  const formSubmitHandler = (e) => {
-    const form = e.target;
+  var formSubmitHandler = function(e) {
+    var form = e.target;
     try {
-      const actionUrl = new URL(form.action, myenv.location.origin);
+      var actionUrl = new URL(form.action, myenv.location.origin);
 
       // Skip same-origin forms
       if (isSameOrigin(actionUrl, myenv)) {
         return;
       }
 
-      const isTarget = isTargetDomain(actionUrl, trackingDomains);
+      var isTarget = isTargetDomain(actionUrl, trackingDomains);
 
       if (isTarget) {
-        const method = (form.method || 'get').toLowerCase();
+        var method = (form.method || 'get').toLowerCase();
 
         // Only decorate GET forms automatically
         // POST forms are skipped to avoid breaking server-side logic (CSRF, routing, etc.)
@@ -82,7 +84,7 @@ export default function decorateLinks(trackingDomains, trackingParamName, tracki
         // Users can manually use cdtUrlDecorator() for form.action if needed
         if (method === 'get') {
           // Add as hidden input which will be appended to the query string
-          let trackingInput = form.querySelector(`input[name="${trackingParamName}"]`);
+          var trackingInput = form.querySelector(`input[name="${trackingParamName}"]`);
 
           if (!trackingInput) {
             trackingInput = myenv.document.createElement('input');
@@ -125,12 +127,12 @@ export default function decorateLinks(trackingDomains, trackingParamName, tracki
   };
 }
 
-export function getCrossDomainTrackingParamValue(paramName) {
+function getCrossDomainTrackingParamValue(paramName) {
   try {
     if (!window || !window.location || !window.location.search) {
       return null;
     }
-    const urlParams = new URLSearchParams(window.location.search);
+    var urlParams = new URLSearchParams(window.location.search);
     return urlParams.get(paramName);
   } catch (err) {
     // URLSearchParams might not be available in older browsers
@@ -141,23 +143,23 @@ export function getCrossDomainTrackingParamValue(paramName) {
 
 // Remove the tracking parameter from the URL to prevent pollution
 // Call this after the parameter has been read and persisted
-export function cleanUrlParameter(paramName) {
+function cleanUrlParameter(paramName) {
   try {
     if (!window || !window.location || !window.history || !window.history.replaceState) {
       return; // Browser doesn't support history API
     }
 
-    const urlParams = new URLSearchParams(window.location.search);
+    var urlParams = new URLSearchParams(window.location.search);
     if (!urlParams.has(paramName)) {
       return; // Parameter not present, nothing to clean
     }
 
     // Remove the parameter
-    urlParams.delete(paramName);
+    urlParams.devare(paramName);
 
-    // Construct the new URL
-    const newSearch = urlParams.toString();
-    const newUrl = window.location.pathname + (newSearch ? '?' + newSearch : '') + window.location.hash;
+    // varruct the new URL
+    var newSearch = urlParams.toString();
+    var newUrl = window.location.pathname + (newSearch ? '?' + newSearch : '') + window.location.hash;
 
     // Replace the URL without reloading the page
     window.history.replaceState(null, '', newUrl);
@@ -165,3 +167,10 @@ export function cleanUrlParameter(paramName) {
     // Silently fail - URL cleaning is not critical
   }
 }
+
+_.crossDomainTrackingUtils = {
+  getCrossDomainTrackingParamValue: getCrossDomainTrackingParamValue,
+  cleanUrlParameter: cleanUrlParameter,
+  cdtUrlDecorator: decorator
+}
+
