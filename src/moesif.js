@@ -6,6 +6,7 @@ import { _, console, userAgent, localStorageSupported, JSONStringify, quick_hash
 import patchAjaxWithCapture from './capture';
 import patchWeb3WithCapture from './web3capture';
 import patchFetchWithCapture from './capture-fetch';
+import decorateLinksForCrossDomainTracking from './cross-domain-tracking';
 import {
   getCampaignDataFromUrlOrCookie,
   storeCampaignDataIfNeeded,
@@ -378,14 +379,14 @@ export default function () {
         // null means decorate all domains (explicit opt-in)
         if (targets === null) {
           console.log('cross domain tracking is enabled for ALL domains and hyperlinks');
-          this._stopCrossDomainTracking = _.crossDomainTrackingUtils.decorateLinksForCrossDomainTracking(
+          this._stopCrossDomainTracking = decorateLinksForCrossDomainTracking(
             null,
             this._options.crossDomainTrackingParameterName,
             this._anonymousId
           );
         } else if (Array.isArray(targets) && targets.length > 0) {
           console.log('decorating links for cross domain tracking on specified domains: ' + targets.join(', '));
-          this._stopCrossDomainTracking = _.crossDomainTrackingUtils.decorateLinksForCrossDomainTracking(
+          this._stopCrossDomainTracking = decorateLinksForCrossDomainTracking(
             targets,
             this._options.crossDomainTrackingParameterName,
             this._anonymousId

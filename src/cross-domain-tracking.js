@@ -84,7 +84,7 @@ export default function decorateLinks(trackingDomains, trackingParamName, tracki
         // Users can manually use cdtUrlDecorator() for form.action if needed
         if (method === 'get') {
           // Add as hidden input which will be appended to the query string
-          var trackingInput = form.querySelector(`input[name="${trackingParamName}"]`);
+          var trackingInput = form.querySelector('input[name="' + trackingParamName + '"]');
 
           if (!trackingInput) {
             trackingInput = myenv.document.createElement('input');
