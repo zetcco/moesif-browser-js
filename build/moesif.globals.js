@@ -3,7 +3,7 @@
 
     var Config = {
         DEBUG: false,
-        LIB_VERSION: '1.8.13'
+        LIB_VERSION: '1.9.0'
     };
 
     // since es6 imports are static and we run unit tests from the console, window won't be defined when importing this file
@@ -56,7 +56,7 @@
     };
 
     // Console override
-    var console = {
+    var console$1 = {
         /** @type {function(...*)} */
         log: function() {
             if (Config.DEBUG && !_.isUndefined(windowConsole) && windowConsole) {
@@ -100,14 +100,14 @@
     var log_func_with_prefix = function(func, prefix) {
         return function() {
             arguments[0] = '[' + prefix + '] ' + arguments[0];
-            return func.apply(console, arguments);
+            return func.apply(console$1, arguments);
         };
     };
     var console_with_prefix = function(prefix) {
         return {
-            log: log_func_with_prefix(console.log, prefix),
-            error: log_func_with_prefix(console.error, prefix),
-            critical: log_func_with_prefix(console.critical, prefix)
+            log: log_func_with_prefix(console$1.log, prefix),
+            error: log_func_with_prefix(console$1.error, prefix),
+            critical: log_func_with_prefix(console$1.critical, prefix)
         };
     };
 
@@ -386,9 +386,9 @@
             try {
                 return f.apply(this, arguments);
             } catch (e) {
-                console.critical('Implementation error. Please turn on debug and contact support@Moesif.com.');
+                console$1.critical('Implementation error. Please turn on debug and contact support@Moesif.com.');
                 if (Config.DEBUG){
-                    console.critical(e);
+                    console$1.critical(e);
                 }
             }
         };
@@ -1023,7 +1023,7 @@
             try {
                 result = decodeURIComponent(result);
             } catch(err) {
-                console.error('Skipping decoding for malformed query param: ' + result);
+                console$1.error('Skipping decoding for malformed query param: ' + result);
             }
             return result.replace(/\+/g, ' ');
         }
@@ -1154,13 +1154,13 @@
         is_supported: function(force_check) {
             var supported = localStorageSupported(null, force_check);
             if (!supported) {
-                console.error('localStorage unsupported; falling back to cookie store');
+                console$1.error('localStorage unsupported; falling back to cookie store');
             }
             return supported;
         },
 
         error: function(msg) {
-            console.error('localStorage error: ' + msg);
+            console$1.error('localStorage error: ' + msg);
         },
 
         get: function(name) {
@@ -1215,7 +1215,7 @@
          */
         var register_event = function(element, type, handler, oldSchool, useCapture) {
             if (!element) {
-                console.error('No valid element provided to register_event');
+                console$1.error('No valid element provided to register_event');
                 return;
             }
 
@@ -2339,6 +2339,183 @@
       }
     }
 
+    function isTargetDomain(urlObj, decoratableDomains) {
+      if (decoratableDomains === null) return true; // Decorate all domains if decoratableDomains is null
+      if (Array.isArray(decoratableDomains) && decoratableDomains.length === 0) return false;
+      return decoratableDomains.some(function(domain) {
+        var target = domain.toLowerCase();
+        var current = urlObj.hostname.toLowerCase();
+        return current === target || current.indexOf('.' + target, current.length - ('.' + target).length) !== -1;
+      });
+    }
+
+    function isSameOrigin(urlObj, env) {
+      var myenv = env || window || self;
+      try {
+        return urlObj.origin === myenv.location.origin;
+      } catch (e) {
+        // Fallback for older browsers
+        return urlObj.hostname === myenv.location.hostname &&
+               urlObj.protocol === myenv.location.protocol &&
+               urlObj.port === myenv.location.port;
+      }
+    }
+
+    function decorator(url, decoratableDomains, trackingParam, trackingValue, env) {
+      if (!url) return url; // Added check for empty/undefined URLs
+      try {
+        var urlObj = new URL(url, window.location.origin);
+
+        // Skip same-origin links to avoid unnecessary overhead and exposure
+        if (isSameOrigin(urlObj, env)) {
+          return url;
+        }
+
+        // Check if the hostname of the URL matches any of the decoratable domains
+        var isTarget = isTargetDomain(urlObj, decoratableDomains);
+
+        if (isTarget) {
+          urlObj.searchParams.set(trackingParam, trackingValue);
+          return urlObj.href;
+        }
+      } catch (e) {
+        return url;
+      }
+      return url;
+    }
+
+    function decorateLinks(trackingDomains, trackingParamName, trackingParamValue, recorder, env) {
+      var myenv = env || window || self;
+
+      // Link click handler - handles various click events
+      var linkClickHandler = function(e) {
+        var link = e.target.closest('a');
+        if (link && link.href) {
+          link.href = decorator(
+            link.href,
+            trackingDomains,
+            trackingParamName,
+            trackingParamValue,
+            myenv
+          );
+        }
+      };
+
+      // Form submission handler
+      var formSubmitHandler = function(e) {
+        var form = e.target;
+        try {
+          var actionUrl = new URL(form.action, myenv.location.origin);
+
+          // Skip same-origin forms
+          if (isSameOrigin(actionUrl, myenv)) {
+            return;
+          }
+
+          var isTarget = isTargetDomain(actionUrl, trackingDomains);
+
+          if (isTarget) {
+            var method = (form.method || 'get').toLowerCase();
+
+            // Only decorate GET forms automatically
+            // POST forms are skipped to avoid breaking server-side logic (CSRF, routing, etc.)
+            // POST body can't be read by JavaScript on the destination page anyway
+            // Users can manually use cdtUrlDecorator() for form.action if needed
+            if (method === 'get') {
+              // Add as hidden input which will be appended to the query string
+              var trackingInput = form.querySelector('input[name="' + trackingParamName + '"]');
+
+              if (!trackingInput) {
+                trackingInput = myenv.document.createElement('input');
+                trackingInput.type = 'hidden';
+                trackingInput.name = trackingParamName;
+                form.appendChild(trackingInput);
+              }
+
+              trackingInput.value = trackingParamValue;
+            }
+          }
+        } catch (err) {
+          // skip decoration
+        }
+      };
+
+      // Add event listeners for various interaction types
+      // regular clicks
+      myenv.addEventListener('mousedown', linkClickHandler, true);
+      // keyboard navigation (Tab + Enter)
+      myenv.addEventListener('click', linkClickHandler, true);
+      // middle-click and other auxiliary button clicks
+      myenv.addEventListener('auxclick', linkClickHandler, true);
+      // right-click (for copy link address)
+      myenv.addEventListener('contextmenu', linkClickHandler, true);
+      // touch events for mobile devices
+      myenv.addEventListener('touchstart', linkClickHandler, true);
+
+      // Form submissions
+      myenv.addEventListener('submit', formSubmitHandler, true);
+
+      // Return cleanup function to remove event listeners
+      return function cleanup() {
+        myenv.removeEventListener('mousedown', linkClickHandler, true);
+        myenv.removeEventListener('click', linkClickHandler, true);
+        myenv.removeEventListener('auxclick', linkClickHandler, true);
+        myenv.removeEventListener('contextmenu', linkClickHandler, true);
+        myenv.removeEventListener('touchstart', linkClickHandler, true);
+        myenv.removeEventListener('submit', formSubmitHandler, true);
+      };
+    }
+
+    function getCrossDomainTrackingParamValue(paramName) {
+      try {
+        if (!window || !window.location || !window.location.search) {
+          return null;
+        }
+        var urlParams = new URLSearchParams(window.location.search);
+        return urlParams.get(paramName);
+      } catch (err) {
+        // URLSearchParams might not be available in older browsers
+        // or window.location might not be accessible
+        return null;
+      }
+    }
+
+    // Remove the tracking parameter from the URL to prevent pollution
+    // Call this after the parameter has been read and persisted
+    function cleanUrlParameter(paramName) {
+      try {
+        if (!window || !window.location || !window.history || !window.history.replaceState) {
+          console.log('Browser does not support URL manipulation APIs, cannot clean URL parameter');
+          return; // Browser doesn't support history API
+        }
+
+        var urlParams = new URLSearchParams(window.location.search);
+        if (!urlParams.has(paramName)) {
+          console.log('URL parameter not present, nothing to clean');
+          return; // Parameter not present, nothing to clean
+        }
+
+        // Remove the parameter
+        urlParams['delete'](paramName); // 'delete' is a reserved keyword, so we use bracket notation
+
+        // reconsruct the new URL
+        var newSearch = urlParams.toString();
+        var newUrl = window.location.pathname + (newSearch ? '?' + newSearch : '') + window.location.hash;
+
+        // Replace the URL without reloading the page
+        window.history.replaceState(null, '', newUrl);
+      } catch (err) {
+        console.log('Error cleaning URL parameter: ' + err.message);
+        // Silently fail - URL cleaning is not critical
+      }
+    }
+
+    _.crossDomainTrackingUtils = {
+      getCrossDomainTrackingParamValue: getCrossDomainTrackingParamValue,
+      cleanUrlParameter: cleanUrlParameter,
+      cdtUrlDecorator: decorator
+    };
+
     // eslint-disable-line
 
     var logger$5 = console_with_prefix('referrer');
@@ -2453,7 +2630,7 @@
     function getPersistenceFunction(opt) {
       var storageType = opt['persistence'];
       if (storageType !== 'cookie' && storageType !== 'localStorage') {
-        console.critical('Unknown persistence type ' + storageType + '; falling back to cookie');
+        console$1.critical('Unknown persistence type ' + storageType + '; falling back to cookie');
         storageType = Config['persistence'] = 'localStorage';
       }
       var prefix = opt['persistence_key_prefix'];
@@ -3292,6 +3469,29 @@
         }
     };
 
+    // Validate anonymous ID format
+    // Should be hex characters separated by dashes, reasonable length
+    function isValidAnonymousId(id) {
+      if (!id || typeof id !== 'string') {
+        return false;
+      }
+      // Limit length to prevent abuse (max 200 chars)
+      if (id.length > 200) {
+        return false;
+      }
+      // Should contain only hex characters and dashes
+      // Format is: hex-hex-hex-hex (from _.UUID())
+      var validPattern = /^[a-f0-9-]+$/i;
+      if (!validPattern.test(id)) {
+        return false;
+      }
+      // Should have at least one dash (segments)
+      if (id.indexOf('-') === -1) {
+        return false;
+      }
+      return true;
+    }
+
     function regenerateAnonymousId(persist) {
       var newId = _.UUID();
       if (persist) {
@@ -3300,7 +3500,29 @@
       return newId;
     }
 
-    function getAnonymousId(persist, opt) {
+    function getAnonymousId(persist, opt, cdtParamName) {
+      // If there is an anonymous id in the url param for cross domain tracking, use that and persist it.
+      if (cdtParamName) { // if cross domain tracking is enabled
+        try {
+          var anonIdFromCrossDomainTracking = _.crossDomainTrackingUtils.getCrossDomainTrackingParamValue(cdtParamName);
+          if (anonIdFromCrossDomainTracking && isValidAnonymousId(anonIdFromCrossDomainTracking)) {
+            persist(STORAGE_CONSTANTS.STORED_ANONYMOUS_ID, anonIdFromCrossDomainTracking);
+            // Clean the URL parameter after persisting to prevent pollution
+            _.crossDomainTrackingUtils.cleanUrlParameter(cdtParamName);
+            return anonIdFromCrossDomainTracking;
+          } else if (anonIdFromCrossDomainTracking) {
+            // Invalid format detected
+            console$1.log('Invalid anonymous ID format from URL parameter, ignoring');
+            // Clean the invalid parameter from URL
+            _.crossDomainTrackingUtils.cleanUrlParameter(cdtParamName);
+          } else {
+            // No parameter found, nothing to do
+            console$1.log('No anonymous ID found in URL parameter for cross-domain tracking');
+          }
+        } catch (err) {
+          console$1.log('Error reading cross-domain tracking parameter: ' + err.message);
+        }
+      }
       var storedAnonId = getFromPersistence(STORAGE_CONSTANTS.STORED_ANONYMOUS_ID, opt);
       if (storedAnonId) {
         return storedAnonId;
@@ -3372,12 +3594,12 @@
     }
 
     function moesifCreator () {
-      console.log('moesif object creator is called');
+      console$1.log('moesif object creator is called');
 
       return {
         'init': function (options) {
           if (!window) {
-            console.critical('Warning, this library need to be initiated on the client side');
+            console$1.critical('Warning, this library need to be initiated on the client side');
           }
 
           ensureValidOptions(options);
@@ -3428,6 +3650,12 @@
           ops['cookie_domain'] = options['cookieDomain'] || '';
           ops['persistence_key_prefix'] = options['persistenceKeyPrefix'];
 
+          // specify domains to be considered for cross domain tracking.
+          ops.enableCrossDomainTracking = options['enableCrossDomainTracking'] || false;
+          // crossDomainTargets: array of domains to decorate, null to decorate all domains, [] or undefined to decorate none
+          ops.crossDomainTargets = Object.hasOwn(options, 'crossDomainTargets') ? options['crossDomainTargets'] : [];
+          ops.crossDomainTrackingParameterName = ops.enableCrossDomainTracking ? (options['crossDomainTrackingParameterName'] || '__mt') : null;
+
           this.requestBatchers = {};
 
           this._options = ops;
@@ -3436,7 +3664,7 @@
             this._userId = getFromPersistence(STORAGE_CONSTANTS.STORED_USER_ID, ops);
             this._session = getFromPersistence(STORAGE_CONSTANTS.STORED_SESSION_ID, ops);
             this._companyId = getFromPersistence(STORAGE_CONSTANTS.STORED_COMPANY_ID, ops);
-            this._anonymousId = getAnonymousId(this._persist, ops);
+            this._anonymousId = getAnonymousId(this._persist, ops, ops.crossDomainTrackingParameterName);
             this._currentCampaign = getCampaignDataFromUrlOrCookie(ops);
 
             if (this._currentCampaign) {
@@ -3456,13 +3684,13 @@
               this.updateUser(anonUserObject, this._options.applicationId, this._options.host, this._options.callback);
             }
           } catch(err) {
-            console.error('error loading saved data from local storage but continue');
+            console$1.error('error loading saved data from local storage but continue');
           }
 
           if (ops.batchEnabled) {
             if (!localStorageSupported() || !USE_XHR) {
               ops.batchEnabled = false;
-              console.log('Turning off batch processing because it needs XHR and localStorage');
+              console$1.log('Turning off batch processing because it needs XHR and localStorage');
             } else {
               this.initBatching();
               if (sendBeacon && window.addEventListener) {
@@ -3488,7 +3716,7 @@
             }
           }
 
-          console.log('moesif initiated');
+          console$1.log('moesif initiated');
           return this;
         },
         _executeRequest: function (url, data, options, callback) {
@@ -3533,7 +3761,7 @@
                   } else {
                     error = 'Bad HTTP status: ' + xmlhttp.status + ' ' + xmlhttp.statusText;
                   }
-                  console.error(error);
+                  console$1.error(error);
                   if (callback) {
                     callback({ status: 0, error: error, xhr_req: xmlhttp }); // eslint-disable-line camelcase
                   }
@@ -3543,8 +3771,8 @@
 
             xmlhttp.send(JSONStringify(data));
           } catch (err) {
-            console.error('failed to send to moesif ' + (data && data['request'] && data['request']['uri']));
-            console.error(err);
+            console$1.error('failed to send to moesif ' + (data && data['request'] && data['request']['uri']));
+            console$1.error(err);
              if (callback) {
               callback({status: 0, error: err });
             }
@@ -3554,7 +3782,7 @@
           var applicationId = this._options.applicationId;
           var host = this._options.host;
 
-          console.log('does requestBatch.events exists? ' + this.requestBatchers.events);
+          console$1.log('does requestBatch.events exists? ' + this.requestBatchers.events);
 
           if (!this.requestBatchers.events) {
             var batchConfig = {
@@ -3606,10 +3834,10 @@
           };
 
           if (this._options.batchEnabled && batcher) {
-            console.log('current batcher storage key is  ' + batcher.queue.storageKey);
+            console$1.log('current batcher storage key is  ' + batcher.queue.storageKey);
             var enqueueCallback = _.bind(function (enqueueSuccess) {
               if (!enqueueSuccess) {
-                console.log('enqueue failed, send immediately');
+                console$1.log('enqueue failed, send immediately');
                 sendImmediately();
               }
             }, this);
@@ -3623,7 +3851,7 @@
           var _self = this;
 
           if (this._stopRecording || this._stopWeb3Recording) {
-            console.log('recording has already started, please call stop first.');
+            console$1.log('recording has already started, please call stop first.');
             return false;
           }
 
@@ -3631,12 +3859,38 @@
             _self.recordEvent(event);
           }
 
-          console.log('moesif starting');
+          console$1.log('moesif starting');
           this._stopRecording = captureXMLHttpRequest(recorder, this._options);
 
           if (!this._options.disableFetch) {
-            console.log('also instrumenting fetch API');
+            console$1.log('also instrumenting fetch API');
             this._stopFetchRecording = patch(recorder);
+          }
+
+          if (this._options.enableCrossDomainTracking) {
+            console$1.log('enabling cross domain tracking');
+
+            var targets = this._options.crossDomainTargets;
+
+            // null means decorate all domains (explicit opt-in)
+            if (targets === null) {
+              console$1.log('cross domain tracking is enabled for ALL domains and hyperlinks');
+              this._stopCrossDomainTracking = decorateLinks(
+                null,
+                this._options.crossDomainTrackingParameterName,
+                this._anonymousId
+              );
+            } else if (Array.isArray(targets) && targets.length > 0) {
+              console$1.log('decorating links for cross domain tracking on specified domains: ' + targets.join(', '));
+              this._stopCrossDomainTracking = decorateLinks(
+                targets,
+                this._options.crossDomainTrackingParameterName,
+                this._anonymousId
+              );
+            } else {
+              console$1.log('cross domain tracking is enabled but no target domains specified - no links will be decorated');
+              // Don't set up event listeners if no targets specified
+            }
           }
 
           this['useWeb3'](passedInWeb3);
@@ -3650,7 +3904,18 @@
           // }
           return true;
         },
-        'useWeb3': function (passedInWeb3) {
+        // Let users decorate their own links with cdt. (ex: for window.open/location, navigation api, etc.)
+        'cdtUrlDecorator': function (url, overrideDomains) {
+          if (overrideDomains === undefined) {
+              overrideDomains = false;
+          }
+          if (!url) {
+            return url;
+          }
+          var decoratableDomains = overrideDomains ? null : this._options.crossDomainTargets;
+          return _.crossDomainTrackingUtils.cdtUrlDecorator(url, decoratableDomains, this._options.crossDomainTrackingParameterName, this._anonymousId, window);
+        },
+         'useWeb3': function (passedInWeb3) {
           var _self = this;
 
           function recorder(event) {
@@ -3666,7 +3931,7 @@
               this._stopWeb3Recording = captureWeb3Requests(passedInWeb3, recorder, this._options);
             } else if (window['web3']) {
               // try to patch the global web3
-              console.log('found global web3, will capture from it');
+              console$1.log('found global web3, will capture from it');
               this._stopWeb3Recording = captureWeb3Requests(window['web3'], recorder, this._options);
             }
             if (this._stopWeb3Recording) {
@@ -3674,7 +3939,7 @@
               return true;
             }
           } catch (err) {
-            console.log('error patching web3, moving forward anyways');
+            console$1.log('error patching web3, moving forward anyways');
             if(this._options.callback) {
               this._options.callback({ status: 0, error: err, message: 'failed to instrument web3, but moving forward with other instrumentation' });
             }
@@ -3691,7 +3956,7 @@
         },
         'identifyUser': function (userId, metadata) {
           if (_.isNil(userId)) {
-            console.critical('identifyUser called with nil userId');
+            console$1.critical('identifyUser called with nil userId');
             return;
           }
 
@@ -3728,7 +3993,7 @@
               this._persist(STORAGE_CONSTANTS.STORED_USER_ID, userId);
             }
           } catch (err) {
-            console.error('error saving to local storage');
+            console$1.error('error saving to local storage');
           }
         },
         updateCompany: function(companyObject, applicationId, host, callback) {
@@ -3741,7 +4006,7 @@
         },
         'identifyCompany': function (companyId, metadata, companyDomain) {
           if (_.isNil(companyId)) {
-            console.critical('identifyCompany called with nil companyId.');
+            console$1.critical('identifyCompany called with nil companyId.');
             return;
           }
 
@@ -3777,12 +4042,12 @@
               this._persist(STORAGE_CONSTANTS.STORED_COMPANY_ID, companyId);
             }
           } catch (err) {
-            console.error('error saving to local storage');
+            console$1.error('error saving to local storage');
           }
         },
         'identifySession': function (session) {
           if (_.isNil(session)) {
-            console.critical('identifySession called with nil');
+            console$1.critical('identifySession called with nil');
             return;
           }
           this._session = session;
@@ -3790,7 +4055,7 @@
             try {
               this._persist(STORAGE_CONSTANTS.STORED_SESSION_ID, session);
             } catch (err) {
-              console.error('local storage error');
+              console$1.error('local storage error');
             }
           }
         },
@@ -3830,7 +4095,7 @@
 
           // sendAction(actionObject, this._options.applicationId, this._options.debug, this._options.callback);
           var endPoint = HTTP_PROTOCOL + _self._options.host + MOESIF_CONSTANTS.ACTION_ENDPOINT;
-          console.log('sending or queuing: ' + actionName);
+          console$1.log('sending or queuing: ' + actionName);
           return _self._sendOrBatch(
             actionObject,
             _self._options.applicationId,
@@ -3841,12 +4106,12 @@
         },
         recordEvent: function (event) {
           if (isMoesif(event)) {
-            console.log('skipped logging for requests to moesif');
+            console$1.log('skipped logging for requests to moesif');
             return;
           }
 
           var _self = this;
-          console.log('determining if should log: ' + event['request']['uri']);
+          console$1.log('determining if should log: ' + event['request']['uri']);
           var logData = Object.assign({}, event);
           if (_self._getUserId()) {
             logData['user_id'] = _self._getUserId();
@@ -3888,7 +4153,7 @@
 
           if (!_self._options.skip(event) && !isMoesif(event)) {
             // sendEvent(logData, _self._options.applicationId, _self._options.callback);
-            console.log('sending or queuing: ' + event['request']['uri']);
+            console$1.log('sending or queuing: ' + event['request']['uri']);
             var endPoint = HTTP_PROTOCOL + _self._options.host + MOESIF_CONSTANTS.EVENT_ENDPOINT;
             _self._sendOrBatch(
               logData,
@@ -3898,7 +4163,7 @@
               _self._options.callback
             );
           } else {
-            console.log('skipped logging for ' + event['request']['uri']);
+            console$1.log('skipped logging for ' + event['request']['uri']);
           }
         },
         _getUserId: function () {
@@ -3922,6 +4187,10 @@
           if (this._stopFetchRecording) {
             this._stopFetchRecording();
             this._stopFetchRecording = null;
+          }
+          if (this._stopCrossDomainTracking) {
+            this._stopCrossDomainTracking();
+            this._stopCrossDomainTracking = null;
           }
         },
         'clearCookies': function () {

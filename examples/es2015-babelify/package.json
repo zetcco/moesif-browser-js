@@ -4,14 +4,17 @@
   "description": "Moesif example: ES2015 Modules/Babelify",
   "main": "index.js",
   "scripts": {
-    "build": "browserify index.js -t [ babelify --compact false ] --outfile bundle.js",
+    "build": "browserify index.js -t [ babelify --presets [ @babel/preset-env ] ] --outfile bundle.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "author": "team@moesif.com",
   "license": "Apache-2.0",
   "dependencies": {
-    "@babel/core": "^7.9.6",
-    "babelify": "^10.0.0",
     "browserify": "^10.2.4"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.29.0",
+    "@babel/preset-env": "^7.29.2",
+    "babelify": "^10.0.0"
   }
 }

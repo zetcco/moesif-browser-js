@@ -6,6 +6,7 @@ import { _, console, userAgent, localStorageSupported, JSONStringify, quick_hash
 import patchAjaxWithCapture from './capture';
 import patchWeb3WithCapture from './web3capture';
 import patchFetchWithCapture from './capture-fetch';
+import decorateLinksForCrossDomainTracking from './cross-domain-tracking';
 import {
   getCampaignDataFromUrlOrCookie,
   storeCampaignDataIfNeeded,
@@ -153,6 +154,12 @@ export default function () {
       ops['cookie_domain'] = options['cookieDomain'] || '';
       ops['persistence_key_prefix'] = options['persistenceKeyPrefix'];
 
+      // specify domains to be considered for cross domain tracking.
+      ops.enableCrossDomainTracking = options['enableCrossDomainTracking'] || false;
+      // crossDomainTargets: array of domains to decorate, null to decorate all domains, [] or undefined to decorate none
+      ops.crossDomainTargets = Object.hasOwn(options, 'crossDomainTargets') ? options['crossDomainTargets'] : [];
+      ops.crossDomainTrackingParameterName = ops.enableCrossDomainTracking ? (options['crossDomainTrackingParameterName'] || '__mt') : null;
+
       this.requestBatchers = {};
 
       this._options = ops;
@@ -161,7 +168,7 @@ export default function () {
         this._userId = getFromPersistence(STORAGE_CONSTANTS.STORED_USER_ID, ops);
         this._session = getFromPersistence(STORAGE_CONSTANTS.STORED_SESSION_ID, ops);
         this._companyId = getFromPersistence(STORAGE_CONSTANTS.STORED_COMPANY_ID, ops);
-        this._anonymousId = getAnonymousId(this._persist, ops);
+        this._anonymousId = getAnonymousId(this._persist, ops, ops.crossDomainTrackingParameterName);
         this._currentCampaign = getCampaignDataFromUrlOrCookie(ops);
 
         if (this._currentCampaign) {
@@ -364,6 +371,32 @@ export default function () {
         this._stopFetchRecording = patchFetchWithCapture(recorder);
       }
 
+      if (this._options.enableCrossDomainTracking) {
+        console.log('enabling cross domain tracking');
+
+        var targets = this._options.crossDomainTargets;
+
+        // null means decorate all domains (explicit opt-in)
+        if (targets === null) {
+          console.log('cross domain tracking is enabled for ALL domains and hyperlinks');
+          this._stopCrossDomainTracking = decorateLinksForCrossDomainTracking(
+            null,
+            this._options.crossDomainTrackingParameterName,
+            this._anonymousId
+          );
+        } else if (Array.isArray(targets) && targets.length > 0) {
+          console.log('decorating links for cross domain tracking on specified domains: ' + targets.join(', '));
+          this._stopCrossDomainTracking = decorateLinksForCrossDomainTracking(
+            targets,
+            this._options.crossDomainTrackingParameterName,
+            this._anonymousId
+          );
+        } else {
+          console.log('cross domain tracking is enabled but no target domains specified - no links will be decorated');
+          // Don't set up event listeners if no targets specified
+        }
+      }
+
       this['useWeb3'](passedInWeb3);
 
       // if (passedInWeb3) {
@@ -375,7 +408,18 @@ export default function () {
       // }
       return true;
     },
-    'useWeb3': function (passedInWeb3) {
+    // Let users decorate their own links with cdt. (ex: for window.open/location, navigation api, etc.)
+    'cdtUrlDecorator': function (url, overrideDomains) {
+      if (overrideDomains === undefined) {
+          overrideDomains = false;
+      }
+      if (!url) {
+        return url;
+      }
+      var decoratableDomains = overrideDomains ? null : this._options.crossDomainTargets;
+      return _.crossDomainTrackingUtils.cdtUrlDecorator(url, decoratableDomains, this._options.crossDomainTrackingParameterName, this._anonymousId, window);
+    },
+     'useWeb3': function (passedInWeb3) {
       var _self = this;
 
       function recorder(event) {
@@ -647,6 +691,10 @@ export default function () {
       if (this._stopFetchRecording) {
         this._stopFetchRecording();
         this._stopFetchRecording = null;
+      }
+      if (this._stopCrossDomainTracking) {
+        this._stopCrossDomainTracking();
+        this._stopCrossDomainTracking = null;
       }
     },
     'clearCookies': function () {
