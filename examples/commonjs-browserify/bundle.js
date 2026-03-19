@@ -3292,6 +3292,29 @@ RequestBatcher.prototype.flush = function(options) {
     }
 };
 
+// Validate anonymous ID format
+// Should be hex characters separated by dashes, reasonable length
+function isValidAnonymousId(id) {
+  if (!id || typeof id !== 'string') {
+    return false;
+  }
+  // Limit length to prevent abuse (max 200 chars)
+  if (id.length > 200) {
+    return false;
+  }
+  // Should contain only hex characters and dashes
+  // Format is: hex-hex-hex-hex (from _.UUID())
+  var validPattern = /^[a-f0-9-]+$/i;
+  if (!validPattern.test(id)) {
+    return false;
+  }
+  // Should have at least one dash (segments)
+  if (id.indexOf('-') === -1) {
+    return false;
+  }
+  return true;
+}
+
 function regenerateAnonymousId(persist) {
   var newId = _.UUID();
   if (persist) {
@@ -3300,7 +3323,26 @@ function regenerateAnonymousId(persist) {
   return newId;
 }
 
-function getAnonymousId(persist, opt) {
+function getAnonymousId(persist, opt, cdtParamName) {
+  // If there is an anonymous id in the url param for cross domain tracking, use that and persist it.
+  if (cdtParamName) { // if cross domain tracking is enabled
+    try {
+      var anonIdFromCrossDomainTracking = _.crossDomainTrackingUtils.getCrossDomainTrackingParamValue(cdtParamName);
+      if (anonIdFromCrossDomainTracking && isValidAnonymousId(anonIdFromCrossDomainTracking)) {
+        persist(STORAGE_CONSTANTS.STORED_ANONYMOUS_ID, anonIdFromCrossDomainTracking);
+        // Clean the URL parameter after persisting to prevent pollution
+        _.crossDomainTrackingUtils.cleanUrlParameter(cdtParamName);
+        return anonIdFromCrossDomainTracking;
+      } else if (anonIdFromCrossDomainTracking) {
+        // Invalid format detected
+        console.error('Invalid anonymous ID format from URL parameter, ignoring');
+        // Clean the invalid parameter from URL
+        _.crossDomainTrackingUtils.cleanUrlParameter(cdtParamName);
+      }
+    } catch (err) {
+      console.error('Error reading cross-domain tracking parameter: ' + err.message);
+    }
+  }
   var storedAnonId = getFromPersistence(STORAGE_CONSTANTS.STORED_ANONYMOUS_ID, opt);
   if (storedAnonId) {
     return storedAnonId;
@@ -3428,6 +3470,12 @@ function moesifCreator () {
       ops['cookie_domain'] = options['cookieDomain'] || '';
       ops['persistence_key_prefix'] = options['persistenceKeyPrefix'];
 
+      // specify domains to be considered for cross domain tracking.
+      ops.enableCrossDomainTracking = options['enableCrossDomainTracking'] || false;
+      // crossDomainTargets: array of domains to decorate, null to decorate all domains, [] or undefined to decorate none
+      ops.crossDomainTargets = Object.hasOwn(options, 'crossDomainTargets') ? options['crossDomainTargets'] : [];
+      ops.crossDomainTrackingParameterName = ops.enableCrossDomainTracking ? (options['crossDomainTrackingParameterName'] || '__mt') : null;
+
       this.requestBatchers = {};
 
       this._options = ops;
@@ -3436,7 +3484,7 @@ function moesifCreator () {
         this._userId = getFromPersistence(STORAGE_CONSTANTS.STORED_USER_ID, ops);
         this._session = getFromPersistence(STORAGE_CONSTANTS.STORED_SESSION_ID, ops);
         this._companyId = getFromPersistence(STORAGE_CONSTANTS.STORED_COMPANY_ID, ops);
-        this._anonymousId = getAnonymousId(this._persist, ops);
+        this._anonymousId = getAnonymousId(this._persist, ops, ops.crossDomainTrackingParameterName);
         this._currentCampaign = getCampaignDataFromUrlOrCookie(ops);
 
         if (this._currentCampaign) {
@@ -3639,6 +3687,32 @@ function moesifCreator () {
         this._stopFetchRecording = patch(recorder);
       }
 
+      if (this._options.enableCrossDomainTracking) {
+        console.log('enabling cross domain tracking');
+
+        var targets = this._options.crossDomainTargets;
+
+        // null means decorate all domains (explicit opt-in)
+        if (targets === null) {
+          console.log('cross domain tracking is enabled for ALL domains and hyperlinks');
+          this._stopCrossDomainTracking = _.crossDomainTrackingUtils.decorateLinksForCrossDomainTracking(
+            null,
+            this._options.crossDomainTrackingParameterName,
+            this._anonymousId
+          );
+        } else if (Array.isArray(targets) && targets.length > 0) {
+          console.log('decorating links for cross domain tracking on specified domains: ' + targets.join(', '));
+          this._stopCrossDomainTracking = _.crossDomainTrackingUtils.decorateLinksForCrossDomainTracking(
+            targets,
+            this._options.crossDomainTrackingParameterName,
+            this._anonymousId
+          );
+        } else {
+          console.log('cross domain tracking is enabled but no target domains specified - no links will be decorated');
+          // Don't set up event listeners if no targets specified
+        }
+      }
+
       this['useWeb3'](passedInWeb3);
 
       // if (passedInWeb3) {
@@ -3650,7 +3724,18 @@ function moesifCreator () {
       // }
       return true;
     },
-    'useWeb3': function (passedInWeb3) {
+    // Let users decorate their own links with cdt. (ex: for window.open/location, navigation api, etc.)
+    'cdtUrlDecorator': function (url, overrideDomains) {
+      if (overrideDomains === undefined) {
+          overrideDomains = false;
+      }
+      if (!url) {
+        return url;
+      }
+      var decoratableDomains = overrideDomains ? null : this._options.crossDomainTargets;
+      return _.crossDomainTrackingUtils.cdtUrlDecorator(url, decoratableDomains, this._options.crossDomainTrackingParameterName, this._anonymousId, window);
+    },
+     'useWeb3': function (passedInWeb3) {
       var _self = this;
 
       function recorder(event) {
@@ -3923,6 +4008,10 @@ function moesifCreator () {
         this._stopFetchRecording();
         this._stopFetchRecording = null;
       }
+      if (this._stopCrossDomainTracking) {
+        this._stopCrossDomainTracking();
+        this._stopCrossDomainTracking = null;
+      }
     },
     'clearCookies': function () {
       clearCookies(this._options);
@@ -4178,59 +4267,101 @@ stringify.default = stringify
 stringify.stable = deterministicStringify
 stringify.stableStringify = deterministicStringify
 
+var LIMIT_REPLACE_NODE = '[...]'
+var CIRCULAR_REPLACE_NODE = '[Circular]'
+
 var arr = []
 var replacerStack = []
 
-// Regular stringify
-function stringify (obj, replacer, spacer) {
-  decirc(obj, '', [], undefined)
-  var res
-  if (replacerStack.length === 0) {
-    res = JSON.stringify(obj, replacer, spacer)
-  } else {
-    res = JSON.stringify(obj, replaceGetterValues(replacer), spacer)
+function defaultOptions () {
+  return {
+    depthLimit: Number.MAX_SAFE_INTEGER,
+    edgesLimit: Number.MAX_SAFE_INTEGER
   }
-  while (arr.length !== 0) {
-    var part = arr.pop()
-    if (part.length === 4) {
-      Object.defineProperty(part[0], part[1], part[3])
+}
+
+// Regular stringify
+function stringify (obj, replacer, spacer, options) {
+  if (typeof options === 'undefined') {
+    options = defaultOptions()
+  }
+
+  decirc(obj, '', 0, [], undefined, 0, options)
+  var res
+  try {
+    if (replacerStack.length === 0) {
+      res = JSON.stringify(obj, replacer, spacer)
     } else {
-      part[0][part[1]] = part[2]
+      res = JSON.stringify(obj, replaceGetterValues(replacer), spacer)
+    }
+  } catch (_) {
+    return JSON.stringify('[unable to serialize, circular reference is too complex to analyze]')
+  } finally {
+    while (arr.length !== 0) {
+      var part = arr.pop()
+      if (part.length === 4) {
+        Object.defineProperty(part[0], part[1], part[3])
+      } else {
+        part[0][part[1]] = part[2]
+      }
     }
   }
   return res
 }
-function decirc (val, k, stack, parent) {
+
+function setReplace (replace, val, k, parent) {
+  var propertyDescriptor = Object.getOwnPropertyDescriptor(parent, k)
+  if (propertyDescriptor.get !== undefined) {
+    if (propertyDescriptor.configurable) {
+      Object.defineProperty(parent, k, { value: replace })
+      arr.push([parent, k, val, propertyDescriptor])
+    } else {
+      replacerStack.push([val, k, replace])
+    }
+  } else {
+    parent[k] = replace
+    arr.push([parent, k, val])
+  }
+}
+
+function decirc (val, k, edgeIndex, stack, parent, depth, options) {
+  depth += 1
   var i
   if (typeof val === 'object' && val !== null) {
     for (i = 0; i < stack.length; i++) {
       if (stack[i] === val) {
-        var propertyDescriptor = Object.getOwnPropertyDescriptor(parent, k)
-        if (propertyDescriptor.get !== undefined) {
-          if (propertyDescriptor.configurable) {
-            Object.defineProperty(parent, k, { value: '[Circular]' })
-            arr.push([parent, k, val, propertyDescriptor])
-          } else {
-            replacerStack.push([val, k])
-          }
-        } else {
-          parent[k] = '[Circular]'
-          arr.push([parent, k, val])
-        }
+        setReplace(CIRCULAR_REPLACE_NODE, val, k, parent)
         return
       }
     }
+
+    if (
+      typeof options.depthLimit !== 'undefined' &&
+      depth > options.depthLimit
+    ) {
+      setReplace(LIMIT_REPLACE_NODE, val, k, parent)
+      return
+    }
+
+    if (
+      typeof options.edgesLimit !== 'undefined' &&
+      edgeIndex + 1 > options.edgesLimit
+    ) {
+      setReplace(LIMIT_REPLACE_NODE, val, k, parent)
+      return
+    }
+
     stack.push(val)
     // Optimize for Arrays. Big arrays could kill the performance otherwise!
     if (Array.isArray(val)) {
       for (i = 0; i < val.length; i++) {
-        decirc(val[i], i, stack, val)
+        decirc(val[i], i, i, stack, val, depth, options)
       }
     } else {
       var keys = Object.keys(val)
       for (i = 0; i < keys.length; i++) {
         var key = keys[i]
-        decirc(val[key], key, stack, val)
+        decirc(val[key], key, i, stack, val, depth, options)
       }
     }
     stack.pop()
@@ -4248,53 +4379,74 @@ function compareFunction (a, b) {
   return 0
 }
 
-function deterministicStringify (obj, replacer, spacer) {
-  var tmp = deterministicDecirc(obj, '', [], undefined) || obj
-  var res
-  if (replacerStack.length === 0) {
-    res = JSON.stringify(tmp, replacer, spacer)
-  } else {
-    res = JSON.stringify(tmp, replaceGetterValues(replacer), spacer)
+function deterministicStringify (obj, replacer, spacer, options) {
+  if (typeof options === 'undefined') {
+    options = defaultOptions()
   }
-  while (arr.length !== 0) {
-    var part = arr.pop()
-    if (part.length === 4) {
-      Object.defineProperty(part[0], part[1], part[3])
+
+  var tmp = deterministicDecirc(obj, '', 0, [], undefined, 0, options) || obj
+  var res
+  try {
+    if (replacerStack.length === 0) {
+      res = JSON.stringify(tmp, replacer, spacer)
     } else {
-      part[0][part[1]] = part[2]
+      res = JSON.stringify(tmp, replaceGetterValues(replacer), spacer)
+    }
+  } catch (_) {
+    return JSON.stringify('[unable to serialize, circular reference is too complex to analyze]')
+  } finally {
+    // Ensure that we restore the object as it was.
+    while (arr.length !== 0) {
+      var part = arr.pop()
+      if (part.length === 4) {
+        Object.defineProperty(part[0], part[1], part[3])
+      } else {
+        part[0][part[1]] = part[2]
+      }
     }
   }
   return res
 }
 
-function deterministicDecirc (val, k, stack, parent) {
+function deterministicDecirc (val, k, edgeIndex, stack, parent, depth, options) {
+  depth += 1
   var i
   if (typeof val === 'object' && val !== null) {
     for (i = 0; i < stack.length; i++) {
       if (stack[i] === val) {
-        var propertyDescriptor = Object.getOwnPropertyDescriptor(parent, k)
-        if (propertyDescriptor.get !== undefined) {
-          if (propertyDescriptor.configurable) {
-            Object.defineProperty(parent, k, { value: '[Circular]' })
-            arr.push([parent, k, val, propertyDescriptor])
-          } else {
-            replacerStack.push([val, k])
-          }
-        } else {
-          parent[k] = '[Circular]'
-          arr.push([parent, k, val])
-        }
+        setReplace(CIRCULAR_REPLACE_NODE, val, k, parent)
         return
       }
     }
-    if (typeof val.toJSON === 'function') {
+    try {
+      if (typeof val.toJSON === 'function') {
+        return
+      }
+    } catch (_) {
       return
     }
+
+    if (
+      typeof options.depthLimit !== 'undefined' &&
+      depth > options.depthLimit
+    ) {
+      setReplace(LIMIT_REPLACE_NODE, val, k, parent)
+      return
+    }
+
+    if (
+      typeof options.edgesLimit !== 'undefined' &&
+      edgeIndex + 1 > options.edgesLimit
+    ) {
+      setReplace(LIMIT_REPLACE_NODE, val, k, parent)
+      return
+    }
+
     stack.push(val)
     // Optimize for Arrays. Big arrays could kill the performance otherwise!
     if (Array.isArray(val)) {
       for (i = 0; i < val.length; i++) {
-        deterministicDecirc(val[i], i, stack, val)
+        deterministicDecirc(val[i], i, i, stack, val, depth, options)
       }
     } else {
       // Create a temporary object in the required way
@@ -4302,10 +4454,10 @@ function deterministicDecirc (val, k, stack, parent) {
       var keys = Object.keys(val).sort(compareFunction)
       for (i = 0; i < keys.length; i++) {
         var key = keys[i]
-        deterministicDecirc(val[key], key, stack, val)
+        deterministicDecirc(val[key], key, i, stack, val, depth, options)
         tmp[key] = val[key]
       }
-      if (parent !== undefined) {
+      if (typeof parent !== 'undefined') {
         arr.push([parent, k, val])
         parent[k] = tmp
       } else {
@@ -4317,15 +4469,20 @@ function deterministicDecirc (val, k, stack, parent) {
 }
 
 // wraps replacer function to handle values we couldn't replace
-// and mark them as [Circular]
+// and mark them as replaced value
 function replaceGetterValues (replacer) {
-  replacer = replacer !== undefined ? replacer : function (k, v) { return v }
+  replacer =
+    typeof replacer !== 'undefined'
+      ? replacer
+      : function (k, v) {
+        return v
+      }
   return function (key, val) {
     if (replacerStack.length > 0) {
       for (var i = 0; i < replacerStack.length; i++) {
         var part = replacerStack[i]
         if (part[1] === key && part[0] === val) {
-          val = '[Circular]'
+          val = part[2]
           replacerStack.splice(i, 1)
           break
         }

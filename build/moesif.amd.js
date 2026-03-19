@@ -3291,6 +3291,29 @@ define(function () { 'use strict';
         }
     };
 
+    // Validate anonymous ID format
+    // Should be hex characters separated by dashes, reasonable length
+    function isValidAnonymousId(id) {
+      if (!id || typeof id !== 'string') {
+        return false;
+      }
+      // Limit length to prevent abuse (max 200 chars)
+      if (id.length > 200) {
+        return false;
+      }
+      // Should contain only hex characters and dashes
+      // Format is: hex-hex-hex-hex (from _.UUID())
+      var validPattern = /^[a-f0-9-]+$/i;
+      if (!validPattern.test(id)) {
+        return false;
+      }
+      // Should have at least one dash (segments)
+      if (id.indexOf('-') === -1) {
+        return false;
+      }
+      return true;
+    }
+
     function regenerateAnonymousId(persist) {
       var newId = _.UUID();
       if (persist) {
@@ -3299,7 +3322,26 @@ define(function () { 'use strict';
       return newId;
     }
 
-    function getAnonymousId(persist, opt) {
+    function getAnonymousId(persist, opt, cdtParamName) {
+      // If there is an anonymous id in the url param for cross domain tracking, use that and persist it.
+      if (cdtParamName) { // if cross domain tracking is enabled
+        try {
+          var anonIdFromCrossDomainTracking = _.crossDomainTrackingUtils.getCrossDomainTrackingParamValue(cdtParamName);
+          if (anonIdFromCrossDomainTracking && isValidAnonymousId(anonIdFromCrossDomainTracking)) {
+            persist(STORAGE_CONSTANTS.STORED_ANONYMOUS_ID, anonIdFromCrossDomainTracking);
+            // Clean the URL parameter after persisting to prevent pollution
+            _.crossDomainTrackingUtils.cleanUrlParameter(cdtParamName);
+            return anonIdFromCrossDomainTracking;
+          } else if (anonIdFromCrossDomainTracking) {
+            // Invalid format detected
+            console.error('Invalid anonymous ID format from URL parameter, ignoring');
+            // Clean the invalid parameter from URL
+            _.crossDomainTrackingUtils.cleanUrlParameter(cdtParamName);
+          }
+        } catch (err) {
+          console.error('Error reading cross-domain tracking parameter: ' + err.message);
+        }
+      }
       var storedAnonId = getFromPersistence(STORAGE_CONSTANTS.STORED_ANONYMOUS_ID, opt);
       if (storedAnonId) {
         return storedAnonId;
@@ -3427,6 +3469,12 @@ define(function () { 'use strict';
           ops['cookie_domain'] = options['cookieDomain'] || '';
           ops['persistence_key_prefix'] = options['persistenceKeyPrefix'];
 
+          // specify domains to be considered for cross domain tracking.
+          ops.enableCrossDomainTracking = options['enableCrossDomainTracking'] || false;
+          // crossDomainTargets: array of domains to decorate, null to decorate all domains, [] or undefined to decorate none
+          ops.crossDomainTargets = Object.hasOwn(options, 'crossDomainTargets') ? options['crossDomainTargets'] : [];
+          ops.crossDomainTrackingParameterName = ops.enableCrossDomainTracking ? (options['crossDomainTrackingParameterName'] || '__mt') : null;
+
           this.requestBatchers = {};
 
           this._options = ops;
@@ -3435,7 +3483,7 @@ define(function () { 'use strict';
             this._userId = getFromPersistence(STORAGE_CONSTANTS.STORED_USER_ID, ops);
             this._session = getFromPersistence(STORAGE_CONSTANTS.STORED_SESSION_ID, ops);
             this._companyId = getFromPersistence(STORAGE_CONSTANTS.STORED_COMPANY_ID, ops);
-            this._anonymousId = getAnonymousId(this._persist, ops);
+            this._anonymousId = getAnonymousId(this._persist, ops, ops.crossDomainTrackingParameterName);
             this._currentCampaign = getCampaignDataFromUrlOrCookie(ops);
 
             if (this._currentCampaign) {
@@ -3638,6 +3686,32 @@ define(function () { 'use strict';
             this._stopFetchRecording = patch(recorder);
           }
 
+          if (this._options.enableCrossDomainTracking) {
+            console.log('enabling cross domain tracking');
+
+            var targets = this._options.crossDomainTargets;
+
+            // null means decorate all domains (explicit opt-in)
+            if (targets === null) {
+              console.log('cross domain tracking is enabled for ALL domains and hyperlinks');
+              this._stopCrossDomainTracking = _.crossDomainTrackingUtils.decorateLinksForCrossDomainTracking(
+                null,
+                this._options.crossDomainTrackingParameterName,
+                this._anonymousId
+              );
+            } else if (Array.isArray(targets) && targets.length > 0) {
+              console.log('decorating links for cross domain tracking on specified domains: ' + targets.join(', '));
+              this._stopCrossDomainTracking = _.crossDomainTrackingUtils.decorateLinksForCrossDomainTracking(
+                targets,
+                this._options.crossDomainTrackingParameterName,
+                this._anonymousId
+              );
+            } else {
+              console.log('cross domain tracking is enabled but no target domains specified - no links will be decorated');
+              // Don't set up event listeners if no targets specified
+            }
+          }
+
           this['useWeb3'](passedInWeb3);
 
           // if (passedInWeb3) {
@@ -3649,7 +3723,18 @@ define(function () { 'use strict';
           // }
           return true;
         },
-        'useWeb3': function (passedInWeb3) {
+        // Let users decorate their own links with cdt. (ex: for window.open/location, navigation api, etc.)
+        'cdtUrlDecorator': function (url, overrideDomains) {
+          if (overrideDomains === undefined) {
+              overrideDomains = false;
+          }
+          if (!url) {
+            return url;
+          }
+          var decoratableDomains = overrideDomains ? null : this._options.crossDomainTargets;
+          return _.crossDomainTrackingUtils.cdtUrlDecorator(url, decoratableDomains, this._options.crossDomainTrackingParameterName, this._anonymousId, window);
+        },
+         'useWeb3': function (passedInWeb3) {
           var _self = this;
 
           function recorder(event) {
@@ -3921,6 +4006,10 @@ define(function () { 'use strict';
           if (this._stopFetchRecording) {
             this._stopFetchRecording();
             this._stopFetchRecording = null;
+          }
+          if (this._stopCrossDomainTracking) {
+            this._stopCrossDomainTracking();
+            this._stopCrossDomainTracking = null;
           }
         },
         'clearCookies': function () {

@@ -172,5 +172,4 @@ _.crossDomainTrackingUtils = {
   getCrossDomainTrackingParamValue: getCrossDomainTrackingParamValue,
   cleanUrlParameter: cleanUrlParameter,
   cdtUrlDecorator: decorator
-}
-
+};
