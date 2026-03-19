@@ -146,24 +146,27 @@ function getCrossDomainTrackingParamValue(paramName) {
 function cleanUrlParameter(paramName) {
   try {
     if (!window || !window.location || !window.history || !window.history.replaceState) {
+      console.log('Browser does not support URL manipulation APIs, cannot clean URL parameter');
       return; // Browser doesn't support history API
     }
 
     var urlParams = new URLSearchParams(window.location.search);
     if (!urlParams.has(paramName)) {
+      console.log('URL parameter not present, nothing to clean');
       return; // Parameter not present, nothing to clean
     }
 
     // Remove the parameter
-    urlParams.devare(paramName);
+    urlParams['delete'](paramName); // 'delete' is a reserved keyword, so we use bracket notation
 
-    // varruct the new URL
+    // reconsruct the new URL
     var newSearch = urlParams.toString();
     var newUrl = window.location.pathname + (newSearch ? '?' + newSearch : '') + window.location.hash;
 
     // Replace the URL without reloading the page
     window.history.replaceState(null, '', newUrl);
   } catch (err) {
+    console.log('Error cleaning URL parameter: ' + err.message);
     // Silently fail - URL cleaning is not critical
   }
 }

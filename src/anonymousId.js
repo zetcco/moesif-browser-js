@@ -44,12 +44,15 @@ function getAnonymousId(persist, opt, cdtParamName) {
         return anonIdFromCrossDomainTracking;
       } else if (anonIdFromCrossDomainTracking) {
         // Invalid format detected
-        console.error('Invalid anonymous ID format from URL parameter, ignoring');
+        console.log('Invalid anonymous ID format from URL parameter, ignoring');
         // Clean the invalid parameter from URL
         _.crossDomainTrackingUtils.cleanUrlParameter(cdtParamName);
+      } else {
+        // No parameter found, nothing to do
+        console.log('No anonymous ID found in URL parameter for cross-domain tracking');
       }
     } catch (err) {
-      console.error('Error reading cross-domain tracking parameter: ' + err.message);
+      console.log('Error reading cross-domain tracking parameter: ' + err.message);
     }
   }
   var storedAnonId = getFromPersistence(STORAGE_CONSTANTS.STORED_ANONYMOUS_ID, opt);
