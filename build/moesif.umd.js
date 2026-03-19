@@ -59,7 +59,7 @@
     };
 
     // Console override
-    var console = {
+    var console$1 = {
         /** @type {function(...*)} */
         log: function() {
             if (Config.DEBUG && !_.isUndefined(windowConsole) && windowConsole) {
@@ -103,14 +103,14 @@
     var log_func_with_prefix = function(func, prefix) {
         return function() {
             arguments[0] = '[' + prefix + '] ' + arguments[0];
-            return func.apply(console, arguments);
+            return func.apply(console$1, arguments);
         };
     };
     var console_with_prefix = function(prefix) {
         return {
-            log: log_func_with_prefix(console.log, prefix),
-            error: log_func_with_prefix(console.error, prefix),
-            critical: log_func_with_prefix(console.critical, prefix)
+            log: log_func_with_prefix(console$1.log, prefix),
+            error: log_func_with_prefix(console$1.error, prefix),
+            critical: log_func_with_prefix(console$1.critical, prefix)
         };
     };
 
@@ -389,9 +389,9 @@
             try {
                 return f.apply(this, arguments);
             } catch (e) {
-                console.critical('Implementation error. Please turn on debug and contact support@Moesif.com.');
+                console$1.critical('Implementation error. Please turn on debug and contact support@Moesif.com.');
                 if (Config.DEBUG){
-                    console.critical(e);
+                    console$1.critical(e);
                 }
             }
         };
@@ -1026,7 +1026,7 @@
             try {
                 result = decodeURIComponent(result);
             } catch(err) {
-                console.error('Skipping decoding for malformed query param: ' + result);
+                console$1.error('Skipping decoding for malformed query param: ' + result);
             }
             return result.replace(/\+/g, ' ');
         }
@@ -1157,13 +1157,13 @@
         is_supported: function(force_check) {
             var supported = localStorageSupported(null, force_check);
             if (!supported) {
-                console.error('localStorage unsupported; falling back to cookie store');
+                console$1.error('localStorage unsupported; falling back to cookie store');
             }
             return supported;
         },
 
         error: function(msg) {
-            console.error('localStorage error: ' + msg);
+            console$1.error('localStorage error: ' + msg);
         },
 
         get: function(name) {
@@ -1218,7 +1218,7 @@
          */
         var register_event = function(element, type, handler, oldSchool, useCapture) {
             if (!element) {
-                console.error('No valid element provided to register_event');
+                console$1.error('No valid element provided to register_event');
                 return;
             }
 
@@ -2488,24 +2488,27 @@
     function cleanUrlParameter(paramName) {
       try {
         if (!window || !window.location || !window.history || !window.history.replaceState) {
+          console.log('Browser does not support URL manipulation APIs, cannot clean URL parameter');
           return; // Browser doesn't support history API
         }
 
         var urlParams = new URLSearchParams(window.location.search);
         if (!urlParams.has(paramName)) {
+          console.log('URL parameter not present, nothing to clean');
           return; // Parameter not present, nothing to clean
         }
 
         // Remove the parameter
-        urlParams.devare(paramName);
+        urlParams['delete'](paramName); // 'delete' is a reserved keyword, so we use bracket notation
 
-        // varruct the new URL
+        // reconsruct the new URL
         var newSearch = urlParams.toString();
         var newUrl = window.location.pathname + (newSearch ? '?' + newSearch : '') + window.location.hash;
 
         // Replace the URL without reloading the page
         window.history.replaceState(null, '', newUrl);
       } catch (err) {
+        console.log('Error cleaning URL parameter: ' + err.message);
         // Silently fail - URL cleaning is not critical
       }
     }
@@ -2630,7 +2633,7 @@
     function getPersistenceFunction(opt) {
       var storageType = opt['persistence'];
       if (storageType !== 'cookie' && storageType !== 'localStorage') {
-        console.critical('Unknown persistence type ' + storageType + '; falling back to cookie');
+        console$1.critical('Unknown persistence type ' + storageType + '; falling back to cookie');
         storageType = Config['persistence'] = 'localStorage';
       }
       var prefix = opt['persistence_key_prefix'];
@@ -3512,12 +3515,15 @@
             return anonIdFromCrossDomainTracking;
           } else if (anonIdFromCrossDomainTracking) {
             // Invalid format detected
-            console.error('Invalid anonymous ID format from URL parameter, ignoring');
+            console$1.log('Invalid anonymous ID format from URL parameter, ignoring');
             // Clean the invalid parameter from URL
             _.crossDomainTrackingUtils.cleanUrlParameter(cdtParamName);
+          } else {
+            // No parameter found, nothing to do
+            console$1.log('No anonymous ID found in URL parameter for cross-domain tracking');
           }
         } catch (err) {
-          console.error('Error reading cross-domain tracking parameter: ' + err.message);
+          console$1.log('Error reading cross-domain tracking parameter: ' + err.message);
         }
       }
       var storedAnonId = getFromPersistence(STORAGE_CONSTANTS.STORED_ANONYMOUS_ID, opt);
@@ -3591,12 +3597,12 @@
     }
 
     function moesifCreator () {
-      console.log('moesif object creator is called');
+      console$1.log('moesif object creator is called');
 
       return {
         'init': function (options) {
           if (!window) {
-            console.critical('Warning, this library need to be initiated on the client side');
+            console$1.critical('Warning, this library need to be initiated on the client side');
           }
 
           ensureValidOptions(options);
@@ -3681,13 +3687,13 @@
               this.updateUser(anonUserObject, this._options.applicationId, this._options.host, this._options.callback);
             }
           } catch(err) {
-            console.error('error loading saved data from local storage but continue');
+            console$1.error('error loading saved data from local storage but continue');
           }
 
           if (ops.batchEnabled) {
             if (!localStorageSupported() || !USE_XHR) {
               ops.batchEnabled = false;
-              console.log('Turning off batch processing because it needs XHR and localStorage');
+              console$1.log('Turning off batch processing because it needs XHR and localStorage');
             } else {
               this.initBatching();
               if (sendBeacon && window.addEventListener) {
@@ -3713,7 +3719,7 @@
             }
           }
 
-          console.log('moesif initiated');
+          console$1.log('moesif initiated');
           return this;
         },
         _executeRequest: function (url, data, options, callback) {
@@ -3758,7 +3764,7 @@
                   } else {
                     error = 'Bad HTTP status: ' + xmlhttp.status + ' ' + xmlhttp.statusText;
                   }
-                  console.error(error);
+                  console$1.error(error);
                   if (callback) {
                     callback({ status: 0, error: error, xhr_req: xmlhttp }); // eslint-disable-line camelcase
                   }
@@ -3768,8 +3774,8 @@
 
             xmlhttp.send(JSONStringify(data));
           } catch (err) {
-            console.error('failed to send to moesif ' + (data && data['request'] && data['request']['uri']));
-            console.error(err);
+            console$1.error('failed to send to moesif ' + (data && data['request'] && data['request']['uri']));
+            console$1.error(err);
              if (callback) {
               callback({status: 0, error: err });
             }
@@ -3779,7 +3785,7 @@
           var applicationId = this._options.applicationId;
           var host = this._options.host;
 
-          console.log('does requestBatch.events exists? ' + this.requestBatchers.events);
+          console$1.log('does requestBatch.events exists? ' + this.requestBatchers.events);
 
           if (!this.requestBatchers.events) {
             var batchConfig = {
@@ -3831,10 +3837,10 @@
           };
 
           if (this._options.batchEnabled && batcher) {
-            console.log('current batcher storage key is  ' + batcher.queue.storageKey);
+            console$1.log('current batcher storage key is  ' + batcher.queue.storageKey);
             var enqueueCallback = _.bind(function (enqueueSuccess) {
               if (!enqueueSuccess) {
-                console.log('enqueue failed, send immediately');
+                console$1.log('enqueue failed, send immediately');
                 sendImmediately();
               }
             }, this);
@@ -3848,7 +3854,7 @@
           var _self = this;
 
           if (this._stopRecording || this._stopWeb3Recording) {
-            console.log('recording has already started, please call stop first.');
+            console$1.log('recording has already started, please call stop first.');
             return false;
           }
 
@@ -3856,36 +3862,36 @@
             _self.recordEvent(event);
           }
 
-          console.log('moesif starting');
+          console$1.log('moesif starting');
           this._stopRecording = captureXMLHttpRequest(recorder, this._options);
 
           if (!this._options.disableFetch) {
-            console.log('also instrumenting fetch API');
+            console$1.log('also instrumenting fetch API');
             this._stopFetchRecording = patch(recorder);
           }
 
           if (this._options.enableCrossDomainTracking) {
-            console.log('enabling cross domain tracking');
+            console$1.log('enabling cross domain tracking');
 
             var targets = this._options.crossDomainTargets;
 
             // null means decorate all domains (explicit opt-in)
             if (targets === null) {
-              console.log('cross domain tracking is enabled for ALL domains and hyperlinks');
+              console$1.log('cross domain tracking is enabled for ALL domains and hyperlinks');
               this._stopCrossDomainTracking = decorateLinks(
                 null,
                 this._options.crossDomainTrackingParameterName,
                 this._anonymousId
               );
             } else if (Array.isArray(targets) && targets.length > 0) {
-              console.log('decorating links for cross domain tracking on specified domains: ' + targets.join(', '));
+              console$1.log('decorating links for cross domain tracking on specified domains: ' + targets.join(', '));
               this._stopCrossDomainTracking = decorateLinks(
                 targets,
                 this._options.crossDomainTrackingParameterName,
                 this._anonymousId
               );
             } else {
-              console.log('cross domain tracking is enabled but no target domains specified - no links will be decorated');
+              console$1.log('cross domain tracking is enabled but no target domains specified - no links will be decorated');
               // Don't set up event listeners if no targets specified
             }
           }
@@ -3928,7 +3934,7 @@
               this._stopWeb3Recording = captureWeb3Requests(passedInWeb3, recorder, this._options);
             } else if (window['web3']) {
               // try to patch the global web3
-              console.log('found global web3, will capture from it');
+              console$1.log('found global web3, will capture from it');
               this._stopWeb3Recording = captureWeb3Requests(window['web3'], recorder, this._options);
             }
             if (this._stopWeb3Recording) {
@@ -3936,7 +3942,7 @@
               return true;
             }
           } catch (err) {
-            console.log('error patching web3, moving forward anyways');
+            console$1.log('error patching web3, moving forward anyways');
             if(this._options.callback) {
               this._options.callback({ status: 0, error: err, message: 'failed to instrument web3, but moving forward with other instrumentation' });
             }
@@ -3953,7 +3959,7 @@
         },
         'identifyUser': function (userId, metadata) {
           if (_.isNil(userId)) {
-            console.critical('identifyUser called with nil userId');
+            console$1.critical('identifyUser called with nil userId');
             return;
           }
 
@@ -3990,7 +3996,7 @@
               this._persist(STORAGE_CONSTANTS.STORED_USER_ID, userId);
             }
           } catch (err) {
-            console.error('error saving to local storage');
+            console$1.error('error saving to local storage');
           }
         },
         updateCompany: function(companyObject, applicationId, host, callback) {
@@ -4003,7 +4009,7 @@
         },
         'identifyCompany': function (companyId, metadata, companyDomain) {
           if (_.isNil(companyId)) {
-            console.critical('identifyCompany called with nil companyId.');
+            console$1.critical('identifyCompany called with nil companyId.');
             return;
           }
 
@@ -4039,12 +4045,12 @@
               this._persist(STORAGE_CONSTANTS.STORED_COMPANY_ID, companyId);
             }
           } catch (err) {
-            console.error('error saving to local storage');
+            console$1.error('error saving to local storage');
           }
         },
         'identifySession': function (session) {
           if (_.isNil(session)) {
-            console.critical('identifySession called with nil');
+            console$1.critical('identifySession called with nil');
             return;
           }
           this._session = session;
@@ -4052,7 +4058,7 @@
             try {
               this._persist(STORAGE_CONSTANTS.STORED_SESSION_ID, session);
             } catch (err) {
-              console.error('local storage error');
+              console$1.error('local storage error');
             }
           }
         },
@@ -4092,7 +4098,7 @@
 
           // sendAction(actionObject, this._options.applicationId, this._options.debug, this._options.callback);
           var endPoint = HTTP_PROTOCOL + _self._options.host + MOESIF_CONSTANTS.ACTION_ENDPOINT;
-          console.log('sending or queuing: ' + actionName);
+          console$1.log('sending or queuing: ' + actionName);
           return _self._sendOrBatch(
             actionObject,
             _self._options.applicationId,
@@ -4103,12 +4109,12 @@
         },
         recordEvent: function (event) {
           if (isMoesif(event)) {
-            console.log('skipped logging for requests to moesif');
+            console$1.log('skipped logging for requests to moesif');
             return;
           }
 
           var _self = this;
-          console.log('determining if should log: ' + event['request']['uri']);
+          console$1.log('determining if should log: ' + event['request']['uri']);
           var logData = Object.assign({}, event);
           if (_self._getUserId()) {
             logData['user_id'] = _self._getUserId();
@@ -4150,7 +4156,7 @@
 
           if (!_self._options.skip(event) && !isMoesif(event)) {
             // sendEvent(logData, _self._options.applicationId, _self._options.callback);
-            console.log('sending or queuing: ' + event['request']['uri']);
+            console$1.log('sending or queuing: ' + event['request']['uri']);
             var endPoint = HTTP_PROTOCOL + _self._options.host + MOESIF_CONSTANTS.EVENT_ENDPOINT;
             _self._sendOrBatch(
               logData,
@@ -4160,7 +4166,7 @@
               _self._options.callback
             );
           } else {
-            console.log('skipped logging for ' + event['request']['uri']);
+            console$1.log('skipped logging for ' + event['request']['uri']);
           }
         },
         _getUserId: function () {
