@@ -565,8 +565,8 @@ Object.defineProperty(exports, "__esModule", {
 });
 exports["default"] = void 0;
 var Config = {
-  DEBUG: true,
-  LIB_VERSION: '1.9.0'
+  DEBUG: false,
+  LIB_VERSION: '1.10.0'
 };
 var _default = exports["default"] = Config;
 
@@ -1107,9 +1107,11 @@ function _default() {
         }
       }
     },
+    // Queue persistence helpers - uses localStorage only (not cookies)
+    // Pending requests are page-specific, not user-specific
     _loadPersistedQueue: function _loadPersistedQueue() {
       try {
-        var persistedQueue = (0, _persistence.getFromPersistence)(_persistence.STORAGE_CONSTANTS.STORED_PENDING_REQUESTS, this._options);
+        var persistedQueue = (0, _persistence.getFromLocalStorageOnly)(_persistence.STORAGE_CONSTANTS.STORED_PENDING_REQUESTS, this._options);
         if (persistedQueue) {
           var parsed = JSON.parse(persistedQueue);
           if (Array.isArray(parsed) && parsed.length > 0) {
@@ -1130,14 +1132,14 @@ function _default() {
           delete copy.callback; // Remove callback function
           return copy;
         });
-        this._persist(_persistence.STORAGE_CONSTANTS.STORED_PENDING_REQUESTS, JSON.stringify(serializableQueue));
+        (0, _persistence.saveToLocalStorageOnly)(_persistence.STORAGE_CONSTANTS.STORED_PENDING_REQUESTS, JSON.stringify(serializableQueue), this._options);
       } catch (err) {
         _utils.console.error('error saving persisted queue: ' + err);
       }
     },
     _clearPersistedQueue: function _clearPersistedQueue() {
       try {
-        this._persist(_persistence.STORAGE_CONSTANTS.STORED_PENDING_REQUESTS, '');
+        (0, _persistence.removeFromLocalStorageOnly)(_persistence.STORAGE_CONSTANTS.STORED_PENDING_REQUESTS, this._options);
       } catch (err) {
         _utils.console.error('error clearing persisted queue: ' + err);
       }
@@ -1567,6 +1569,7 @@ function _default() {
     },
     'clearStorage': function clearStorage() {
       (0, _persistence.clearLocalStorage)(this._options);
+      this._clearPersistedQueue();
     },
     'resetAnonymousId': function resetAnonymousId() {
       this._anonymousId = (0, _anonymousId.regenerateAnonymousId)(this._persist);
@@ -1581,6 +1584,7 @@ function _default() {
       this._session = null;
       this._currentCampaign = null;
       this._pendingRequests = [];
+      this._clearPersistedQueue();
       // Consent state is NOT reset - use revokePublishingConsent() to explicitly revoke consent
     },
     '_flushPendingRequests': function _flushPendingRequests() {
@@ -1701,8 +1705,11 @@ Object.defineProperty(exports, "__esModule", {
 exports.STORAGE_CONSTANTS = void 0;
 exports.clearCookies = clearCookies;
 exports.clearLocalStorage = clearLocalStorage;
+exports.getFromLocalStorageOnly = getFromLocalStorageOnly;
 exports.getFromPersistence = getFromPersistence;
 exports.getPersistenceFunction = getPersistenceFunction;
+exports.removeFromLocalStorageOnly = removeFromLocalStorageOnly;
+exports.saveToLocalStorageOnly = saveToLocalStorageOnly;
 var _config = _interopRequireDefault(require("./config"));
 var _utils = require("./utils");
 function _interopRequireDefault(e) { return e && e.__esModule ? e : { "default": e }; }
@@ -1757,12 +1764,23 @@ function ensureNotNilString(str) {
   return str;
 }
 
+// Helper to check if localStorage should be used based on user's persistence preference
+function shouldUseLocalStorage(opt) {
+  var storageType = opt && opt['persistence'];
+  return storageType !== 'cookie' && _utils._.localStorage.is_supported();
+}
+
+// Helper to get resolved storage key with prefix
+function getResolvedKey(key, opt) {
+  var prefix = opt && opt['persistence_key_prefix'];
+  return replacePrefix(key, prefix);
+}
+
 // this tries to get from either cookie or localStorage.
 // whichever have data.
 function getFromPersistence(key, opt) {
   var storageType = opt && opt['persistence'];
-  var prefix = opt && opt['persistence_key_prefix'];
-  var resolvedKey = replacePrefix(key, prefix);
+  var resolvedKey = getResolvedKey(key, opt);
   if (_utils._.localStorage.is_supported()) {
     var localValue = ensureNotNilString(_utils._.localStorage.get(resolvedKey));
     var cookieValue = ensureNotNilString(_utils._.cookie.get(resolvedKey));
@@ -1776,22 +1794,44 @@ function getFromPersistence(key, opt) {
   return ensureNotNilString(_utils._.cookie.get(resolvedKey));
 }
 function clearCookies(opt) {
-  var prefix = opt && opt['persistence_key_prefix'];
-  _utils._.cookie.remove(replacePrefix(STORAGE_CONSTANTS.STORED_USER_ID, prefix));
-  _utils._.cookie.remove(replacePrefix(STORAGE_CONSTANTS.STORED_COMPANY_ID, prefix));
-  _utils._.cookie.remove(replacePrefix(STORAGE_CONSTANTS.STORED_ANONYMOUS_ID, prefix));
-  _utils._.cookie.remove(replacePrefix(STORAGE_CONSTANTS.STORED_SESSION_ID, prefix));
-  _utils._.cookie.remove(replacePrefix(STORAGE_CONSTANTS.STORED_CAMPAIGN_DATA_USER, prefix));
-  _utils._.cookie.remove(replacePrefix(STORAGE_CONSTANTS.STORED_CAMPAIGN_DATA_COMPANY, prefix));
+  _utils._.cookie.remove(getResolvedKey(STORAGE_CONSTANTS.STORED_USER_ID, opt));
+  _utils._.cookie.remove(getResolvedKey(STORAGE_CONSTANTS.STORED_COMPANY_ID, opt));
+  _utils._.cookie.remove(getResolvedKey(STORAGE_CONSTANTS.STORED_ANONYMOUS_ID, opt));
+  _utils._.cookie.remove(getResolvedKey(STORAGE_CONSTANTS.STORED_SESSION_ID, opt));
+  _utils._.cookie.remove(getResolvedKey(STORAGE_CONSTANTS.STORED_CAMPAIGN_DATA_USER, opt));
+  _utils._.cookie.remove(getResolvedKey(STORAGE_CONSTANTS.STORED_CAMPAIGN_DATA_COMPANY, opt));
 }
 function clearLocalStorage(opt) {
-  var prefix = opt && opt['persistence_key_prefix'];
-  _utils._.localStorage.remove(replacePrefix(STORAGE_CONSTANTS.STORED_USER_ID, prefix));
-  _utils._.localStorage.remove(replacePrefix(STORAGE_CONSTANTS.STORED_COMPANY_ID, prefix));
-  _utils._.localStorage.remove(replacePrefix(STORAGE_CONSTANTS.STORED_ANONYMOUS_ID, prefix));
-  _utils._.localStorage.remove(replacePrefix(STORAGE_CONSTANTS.STORED_SESSION_ID, prefix));
-  _utils._.localStorage.remove(replacePrefix(STORAGE_CONSTANTS.STORED_CAMPAIGN_DATA_USER, prefix));
-  _utils._.localStorage.remove(replacePrefix(STORAGE_CONSTANTS.STORED_CAMPAIGN_DATA_COMPANY, prefix));
+  _utils._.localStorage.remove(getResolvedKey(STORAGE_CONSTANTS.STORED_USER_ID, opt));
+  _utils._.localStorage.remove(getResolvedKey(STORAGE_CONSTANTS.STORED_COMPANY_ID, opt));
+  _utils._.localStorage.remove(getResolvedKey(STORAGE_CONSTANTS.STORED_ANONYMOUS_ID, opt));
+  _utils._.localStorage.remove(getResolvedKey(STORAGE_CONSTANTS.STORED_SESSION_ID, opt));
+  _utils._.localStorage.remove(getResolvedKey(STORAGE_CONSTANTS.STORED_CAMPAIGN_DATA_USER, opt));
+  _utils._.localStorage.remove(getResolvedKey(STORAGE_CONSTANTS.STORED_CAMPAIGN_DATA_COMPANY, opt));
+}
+
+// LocalStorage-only helpers for page-specific data (e.g., pending requests queue)
+// These do NOT sync to cookies and are not meant for cross-subdomain data
+// Respects user's persistence preference - if they opted for 'cookie' mode, localStorage is not used
+function getFromLocalStorageOnly(key, opt) {
+  if (!shouldUseLocalStorage(opt)) {
+    return null;
+  }
+  return ensureNotNilString(_utils._.localStorage.get(getResolvedKey(key, opt)));
+}
+function saveToLocalStorageOnly(key, value, opt) {
+  if (!shouldUseLocalStorage(opt)) {
+    return false;
+  }
+  _utils._.localStorage.set(getResolvedKey(key, opt), value);
+  return true;
+}
+function removeFromLocalStorageOnly(key, opt) {
+  if (!shouldUseLocalStorage(opt)) {
+    return false;
+  }
+  _utils._.localStorage.remove(getResolvedKey(key, opt));
+  return true;
 }
 
 },{"./config":6,"./utils":17}],13:[function(require,module,exports){

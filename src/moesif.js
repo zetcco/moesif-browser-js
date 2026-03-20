@@ -20,7 +20,10 @@ import {
   getFromPersistence,
   clearCookies,
   STORAGE_CONSTANTS,
-  clearLocalStorage
+  clearLocalStorage,
+  getFromLocalStorageOnly,
+  saveToLocalStorageOnly,
+  removeFromLocalStorageOnly
 } from './persistence';
 import { getAnonymousId, regenerateAnonymousId } from './anonymousId';
 
@@ -298,9 +301,11 @@ export default function () {
         }
       }
     },
+    // Queue persistence helpers - uses localStorage only (not cookies)
+    // Pending requests are page-specific, not user-specific
     _loadPersistedQueue: function() {
       try {
-        var persistedQueue = getFromPersistence(STORAGE_CONSTANTS.STORED_PENDING_REQUESTS, this._options);
+        var persistedQueue = getFromLocalStorageOnly(STORAGE_CONSTANTS.STORED_PENDING_REQUESTS, this._options);
         if (persistedQueue) {
           var parsed = JSON.parse(persistedQueue);
           if (Array.isArray(parsed) && parsed.length > 0) {
@@ -321,14 +326,14 @@ export default function () {
           delete copy.callback; // Remove callback function
           return copy;
         });
-        this._persist(STORAGE_CONSTANTS.STORED_PENDING_REQUESTS, JSON.stringify(serializableQueue));
+        saveToLocalStorageOnly(STORAGE_CONSTANTS.STORED_PENDING_REQUESTS, JSON.stringify(serializableQueue), this._options);
       } catch (err) {
         console.error('error saving persisted queue: ' + err);
       }
     },
     _clearPersistedQueue: function() {
       try {
-        this._persist(STORAGE_CONSTANTS.STORED_PENDING_REQUESTS, '');
+        removeFromLocalStorageOnly(STORAGE_CONSTANTS.STORED_PENDING_REQUESTS, this._options);
       } catch (err) {
         console.error('error clearing persisted queue: ' + err);
       }
@@ -828,6 +833,7 @@ export default function () {
     },
     'clearStorage': function () {
       clearLocalStorage(this._options);
+      this._clearPersistedQueue();
     },
     'resetAnonymousId': function () {
       this._anonymousId = regenerateAnonymousId(this._persist);
@@ -842,6 +848,7 @@ export default function () {
       this._session = null;
       this._currentCampaign = null;
       this._pendingRequests = [];
+      this._clearPersistedQueue();
       // Consent state is NOT reset - use revokePublishingConsent() to explicitly revoke consent
     },
     '_flushPendingRequests': function() {
