@@ -160,10 +160,19 @@ export default function () {
       ops.crossDomainTargets = Object.hasOwn(options, 'crossDomainTargets') ? options['crossDomainTargets'] : [];
       ops.crossDomainTrackingParameterName = ops.enableCrossDomainTracking ? (options['crossDomainTrackingParameterName'] || '__mt') : null;
 
+      // consent management options
+      ops.requireConsent = options['requireConsent'] || false;
+
       this.requestBatchers = {};
 
       this._options = ops;
       this._persist = getPersistenceFunction(ops);
+
+      // Initialize consent state and pending requests queue
+      // If consent is not required, it's automatically granted
+      this._consentGranted = !ops.requireConsent;
+      this._pendingRequests = [];
+
       try {
         this._userId = getFromPersistence(STORAGE_CONSTANTS.STORED_USER_ID, ops);
         this._session = getFromPersistence(STORAGE_CONSTANTS.STORED_SESSION_ID, ops);
@@ -282,6 +291,22 @@ export default function () {
         }
       }
     },
+    _executeOrQueueRequest: function(url, data, options, callback) {
+      // Check consent before sending
+      if (!this._consentGranted) {
+        console.log('consent not granted, queuing request');
+        this._pendingRequests.push({
+          type: 'direct',
+          url: url,
+          data: data,
+          options: options,
+          callback: callback
+        });
+        return;
+      }
+
+      this._executeRequest(url, data, options, callback);
+    },
     initBatching: function () {
       var applicationId = this._options.applicationId;
       var host = this._options.host;
@@ -329,6 +354,20 @@ export default function () {
     _sendOrBatch: function(data, applicationId, endPoint, batcher, callback) {
       var requestInitiated = true;
       var self = this;
+
+      // Check consent before sending
+      if (!this._consentGranted) {
+        console.log('consent not granted, queuing request');
+        this._pendingRequests.push({
+          type: 'batch',
+          data: data,
+          applicationId: applicationId,
+          endPoint: endPoint,
+          batcher: batcher,
+          callback: callback
+        });
+        return true;
+      }
 
       var sendImmediately = function () {
         var executeOps = {
@@ -451,7 +490,7 @@ export default function () {
       return false;
     },
     updateUser: function(userObject, applicationId, host, callback) {
-      this._executeRequest(
+      this._executeOrQueueRequest(
         HTTP_PROTOCOL + host + MOESIF_CONSTANTS.USER_ENDPOINT,
         userObject,
         { applicationId: applicationId },
@@ -501,7 +540,7 @@ export default function () {
       }
     },
     updateCompany: function(companyObject, applicationId, host, callback) {
-      this._executeRequest(
+      this._executeOrQueueRequest(
         HTTP_PROTOCOL + host + MOESIF_CONSTANTS.COMPANY_ENDPOINT,
         companyObject,
         { applicationId: applicationId },
@@ -715,6 +754,60 @@ export default function () {
       this._userId = null;
       this._session = null;
       this._currentCampaign = null;
+      this._pendingRequests = [];
+      if (this._options.requireConsent) {
+        this._consentGranted = false;
+      }
+    },
+    '_flushPendingRequests': function() {
+      console.log('flushing ' + this._pendingRequests.length + ' pending requests');
+
+      while (this._pendingRequests.length > 0) {
+        var request = this._pendingRequests.shift();
+
+        if (request.type === 'batch') {
+          // Re-call _sendOrBatch, but now consent is granted so it will send
+          this._sendOrBatch(
+            request.data,
+            request.applicationId,
+            request.endPoint,
+            request.batcher,
+            request.callback
+          );
+        } else if (request.type === 'direct') {
+          // Direct requests (user/company updates) - just execute with stored parameters
+          this._executeRequest(
+            request.url,
+            request.data,
+            request.options,
+            request.callback
+          );
+        }
+      }
+    },
+    'grantConsent': function() {
+      if (this._consentGranted) {
+        console.log('consent already granted');
+        return;
+      }
+
+      console.log('granting consent and flushing pending requests');
+      this._consentGranted = true;
+      this._flushPendingRequests();
+    },
+    'revokeConsent': function() {
+      if (!this._consentGranted) {
+        console.log('consent already revoked');
+        return;
+      }
+
+      console.log('revoking consent - future requests will be queued');
+      this._consentGranted = false;
+      // Clear pending requests when revoking consent
+      this._pendingRequests = [];
+    },
+    'isConsentGranted': function() {
+      return this._consentGranted;
     }
   };
 }
