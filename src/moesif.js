@@ -773,9 +773,7 @@ export default function () {
       this._session = null;
       this._currentCampaign = null;
       this._pendingRequests = [];
-      if (this._options.requirePublishingConsent) {
-        this._publishingConsentGranted = false;
-      }
+      // Consent state is NOT reset - use revokePublishingConsent() to explicitly revoke consent
     },
     '_flushPendingRequests': function() {
       console.log('flushing ' + this._pendingRequests.length + ' pending requests');
