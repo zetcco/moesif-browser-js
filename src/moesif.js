@@ -173,6 +173,7 @@ export default function () {
       // If consent is not required, it's automatically granted
       this._publishingConsentGranted = !ops.requirePublishingConsent;
       this._pendingRequests = [];
+      this._recordingActive = false; // Track if recording is active
 
       try {
         this._userId = getFromPersistence(STORAGE_CONSTANTS.STORED_USER_ID, ops);
@@ -333,6 +334,15 @@ export default function () {
       }
     },
     _enqueueRequest: function(requestObject) {
+      // Don't queue if recording is not active
+      if (!this._recordingActive) {
+        console.log('recording is not active, dropping request');
+        if (requestObject.callback) {
+          requestObject.callback({ status: 0, error: 'Recording is not active' });
+        }
+        return;
+      }
+
       // FIFO queue: if queue is full, remove oldest request and add newest
       if (this._pendingRequests.length >= this._options.maxQueueSize) {
         var droppedRequest = this._pendingRequests.shift(); // Remove oldest
@@ -458,6 +468,7 @@ export default function () {
       }
 
       console.log('moesif starting');
+      this._recordingActive = true; // Mark recording as active
       this._stopRecording = patchAjaxWithCapture(recorder, this._options);
 
       if (!this._options.disableFetch) {
@@ -792,6 +803,9 @@ export default function () {
       return this._session;
     },
     'stop': function () {
+      console.log('stopping moesif recording');
+      this._recordingActive = false; // Mark recording as inactive
+
       if (this._stopRecording) {
         this._stopRecording();
         this._stopRecording = null;
