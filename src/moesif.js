@@ -185,6 +185,11 @@ export default function () {
           storeCampaignDataIfNeeded(this._persist, ops, this._currentCampaign);
         }
 
+        // Load persisted pending requests queue if consent is required
+        if (ops.requirePublishingConsent) {
+          this._loadPersistedQueue();
+        }
+
         // this._campaign = getCampaignData(this._persist, ops);
 
         // try to save campaign data on anonymous id
@@ -292,6 +297,41 @@ export default function () {
         }
       }
     },
+    _loadPersistedQueue: function() {
+      try {
+        var persistedQueue = getFromPersistence(STORAGE_CONSTANTS.STORED_PENDING_REQUESTS, this._options);
+        if (persistedQueue) {
+          var parsed = JSON.parse(persistedQueue);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            this._pendingRequests = parsed;
+            console.log('loaded ' + parsed.length + ' requests from persisted queue');
+          }
+        }
+      } catch (err) {
+        console.error('error loading persisted queue: ' + err);
+        this._pendingRequests = [];
+      }
+    },
+    _savePersistedQueue: function() {
+      try {
+        // Serialize queue without callbacks (callbacks can't be serialized)
+        var serializableQueue = this._pendingRequests.map(function(req) {
+          var copy = Object.assign({}, req);
+          delete copy.callback; // Remove callback function
+          return copy;
+        });
+        this._persist(STORAGE_CONSTANTS.STORED_PENDING_REQUESTS, JSON.stringify(serializableQueue));
+      } catch (err) {
+        console.error('error saving persisted queue: ' + err);
+      }
+    },
+    _clearPersistedQueue: function() {
+      try {
+        this._persist(STORAGE_CONSTANTS.STORED_PENDING_REQUESTS, '');
+      } catch (err) {
+        console.error('error clearing persisted queue: ' + err);
+      }
+    },
     _enqueueRequest: function(requestObject) {
       // FIFO queue: if queue is full, remove oldest request and add newest
       if (this._pendingRequests.length >= this._options.maxQueueSize) {
@@ -304,6 +344,9 @@ export default function () {
 
       console.log('publishing consent not granted, queuing request');
       this._pendingRequests.push(requestObject);
+
+      // Persist queue to storage
+      this._savePersistedQueue();
     },
     _executeOrQueueRequest: function(url, data, options, callback) {
       // Check consent before sending
@@ -812,6 +855,9 @@ export default function () {
           );
         }
       }
+
+      // Clear persisted queue after flushing
+      this._clearPersistedQueue();
     },
     'grantPublishingConsent': function() {
       if (this._publishingConsentGranted) {
@@ -833,6 +879,8 @@ export default function () {
       this._publishingConsentGranted = false;
       // Clear pending requests when revoking consent
       this._pendingRequests = [];
+      // Clear persisted queue as well
+      this._clearPersistedQueue();
     },
     'isPublishingConsentGranted': function() {
       return this._publishingConsentGranted;
