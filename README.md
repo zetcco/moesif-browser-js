@@ -411,9 +411,9 @@ This is the recommended approach for strict "consent-first" implementations wher
 If you want to **track user actions locally without sending data to Moesif until consent is granted**, use the `requirePublishingConsent` option. This approach allows you to:
 
 - Track all user actions and API calls without any loss of data
-- Store tracked events locally (in localStorage/cookies) in a queue
+- Store tracked events locally in a queue (persisted to localStorage only, NOT cookies)
 - Automatically flush the queue to Moesif when consent is granted
-- Continue tracking seamlessly across page refreshes
+- Continue tracking seamlessly across page refreshes (when using default `localStorage` persistence mode)
 
 This is ideal when you want **zero data loss** while still respecting user privacy - all events are tracked locally and sent to Moesif only after the user explicitly consents.
 
@@ -491,7 +491,8 @@ When `requirePublishingConsent: true` is set:
 
 1. **Before Consent:**
    - All `track()` calls, `identifyUser()`, `identifyCompany()`, and API events are queued locally
-   - Queue is persisted to localStorage/cookies (survives page refreshes)
+   - Queue is persisted to **localStorage only** (NOT cookies) and survives page refreshes
+   - **Note:** If `persistence: 'cookie'` mode is used, the queue will NOT persist across page refreshes (in-memory only)
    - Cross-domain tracking links are NOT decorated (no anonymousId in URLs)
    - Queue follows FIFO (First-In-First-Out) - oldest events dropped when limit reached
 
@@ -681,8 +682,10 @@ This ensures that if the user clears local storage or visits a different subdoma
 a cookie to fall back to and the user can be accurately attributed. This setting is recommended for most applications.
 
 * When set to `cookie`, session info and anonymous ids is persisted to cookies only. No local storage is used.
+**Note:** If you're using the `requirePublishingConsent` feature, the pending events queue will NOT persist across page refreshes in this mode (stored in-memory only).
 
 * When set to `none`, nothing will be persisted. Not recommended except for advanced use cases or testing. Refreshing the browser tab will create a new user session.
+**Note:** The pending events queue (when using `requirePublishingConsent`) will also not persist across page refreshes in this mode.
 
 Keep in mind if a user clears both their cookies and their local storage, then a new `anonymousId` will be generated,
 As long as you called `identifyUser` before the data was cleared, Moesif will still merge the two sessions.
