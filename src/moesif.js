@@ -162,6 +162,7 @@ export default function () {
 
       // consent management options
       ops.requirePublishingConsent = options['requirePublishingConsent'] || false;
+      ops.maxQueueSize = options['maxQueueSize'] || 1000; // Max pending requests before consent
 
       this.requestBatchers = {};
 
@@ -291,11 +292,23 @@ export default function () {
         }
       }
     },
+    _enqueueRequest: function(requestObject) {
+      // FIFO queue: if queue is full, remove oldest request and add newest
+      if (this._pendingRequests.length >= this._options.maxQueueSize) {
+        var droppedRequest = this._pendingRequests.shift(); // Remove oldest
+        console.log('queue size limit reached (' + this._options.maxQueueSize + '), dropping oldest request');
+        if (droppedRequest && droppedRequest.callback) {
+          droppedRequest.callback({ status: 0, error: 'Dropped from queue - queue size limit reached' });
+        }
+      }
+
+      console.log('publishing consent not granted, queuing request');
+      this._pendingRequests.push(requestObject);
+    },
     _executeOrQueueRequest: function(url, data, options, callback) {
       // Check consent before sending
       if (!this._publishingConsentGranted) {
-        console.log('publishing consent not granted, queuing request');
-        this._pendingRequests.push({
+        this._enqueueRequest({
           type: 'direct',
           url: url,
           data: data,
@@ -357,8 +370,7 @@ export default function () {
 
       // Check consent before sending
       if (!this._publishingConsentGranted) {
-        console.log('publishing consent not granted, queuing request');
-        this._pendingRequests.push({
+        this._enqueueRequest({
           type: 'batch',
           data: data,
           applicationId: applicationId,
