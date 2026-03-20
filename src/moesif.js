@@ -161,7 +161,7 @@ export default function () {
       ops.crossDomainTrackingParameterName = ops.enableCrossDomainTracking ? (options['crossDomainTrackingParameterName'] || '__mt') : null;
 
       // consent management options
-      ops.requireConsent = options['requireConsent'] || false;
+      ops.requirePublishingConsent = options['requirePublishingConsent'] || false;
 
       this.requestBatchers = {};
 
@@ -170,7 +170,7 @@ export default function () {
 
       // Initialize consent state and pending requests queue
       // If consent is not required, it's automatically granted
-      this._consentGranted = !ops.requireConsent;
+      this._publishingConsentGranted = !ops.requirePublishingConsent;
       this._pendingRequests = [];
 
       try {
@@ -293,8 +293,8 @@ export default function () {
     },
     _executeOrQueueRequest: function(url, data, options, callback) {
       // Check consent before sending
-      if (!this._consentGranted) {
-        console.log('consent not granted, queuing request');
+      if (!this._publishingConsentGranted) {
+        console.log('publishing consent not granted, queuing request');
         this._pendingRequests.push({
           type: 'direct',
           url: url,
@@ -356,8 +356,8 @@ export default function () {
       var self = this;
 
       // Check consent before sending
-      if (!this._consentGranted) {
-        console.log('consent not granted, queuing request');
+      if (!this._publishingConsentGranted) {
+        console.log('publishing consent not granted, queuing request');
         this._pendingRequests.push({
           type: 'batch',
           data: data,
@@ -415,20 +415,31 @@ export default function () {
 
         var targets = this._options.crossDomainTargets;
 
+        // If user has not consented to publishing data, we should not decorate links for cross domain tracking
+        var crossDomainDecoratorMiddleware = _.bind(function(context, next) {
+          if (this._publishingConsentGranted) {
+            next();
+          } else {
+            // if no consent, skip decoration (ex: not call next())
+          }
+        }, this);
+
         // null means decorate all domains (explicit opt-in)
         if (targets === null) {
           console.log('cross domain tracking is enabled for ALL domains and hyperlinks');
           this._stopCrossDomainTracking = decorateLinksForCrossDomainTracking(
             null,
             this._options.crossDomainTrackingParameterName,
-            this._anonymousId
+            this._anonymousId,
+            crossDomainDecoratorMiddleware
           );
         } else if (Array.isArray(targets) && targets.length > 0) {
           console.log('decorating links for cross domain tracking on specified domains: ' + targets.join(', '));
           this._stopCrossDomainTracking = decorateLinksForCrossDomainTracking(
             targets,
             this._options.crossDomainTrackingParameterName,
-            this._anonymousId
+            this._anonymousId,
+            crossDomainDecoratorMiddleware
           );
         } else {
           console.log('cross domain tracking is enabled but no target domains specified - no links will be decorated');
@@ -455,6 +466,13 @@ export default function () {
       if (!url) {
         return url;
       }
+
+      // Check consent before decorating
+      if (!this._publishingConsentGranted) {
+        console.log('publishing consent not granted, skipping URL decoration');
+        return url;
+      }
+
       var decoratableDomains = overrideDomains ? null : this._options.crossDomainTargets;
       return _.crossDomainTrackingUtils.cdtUrlDecorator(url, decoratableDomains, this._options.crossDomainTrackingParameterName, this._anonymousId, window);
     },
@@ -755,8 +773,8 @@ export default function () {
       this._session = null;
       this._currentCampaign = null;
       this._pendingRequests = [];
-      if (this._options.requireConsent) {
-        this._consentGranted = false;
+      if (this._options.requirePublishingConsent) {
+        this._publishingConsentGranted = false;
       }
     },
     '_flushPendingRequests': function() {
@@ -785,29 +803,29 @@ export default function () {
         }
       }
     },
-    'grantConsent': function() {
-      if (this._consentGranted) {
-        console.log('consent already granted');
+    'grantPublishingConsent': function() {
+      if (this._publishingConsentGranted) {
+        console.log('publishing consent already granted');
         return;
       }
 
-      console.log('granting consent and flushing pending requests');
-      this._consentGranted = true;
+      console.log('granting publishing consent and flushing pending requests');
+      this._publishingConsentGranted = true;
       this._flushPendingRequests();
     },
-    'revokeConsent': function() {
-      if (!this._consentGranted) {
-        console.log('consent already revoked');
+    'revokePublishingConsent': function() {
+      if (!this._publishingConsentGranted) {
+        console.log('publishing consent already revoked');
         return;
       }
 
-      console.log('revoking consent - future requests will be queued');
-      this._consentGranted = false;
+      console.log('revoking publishing consent - future requests will be queued');
+      this._publishingConsentGranted = false;
       // Clear pending requests when revoking consent
       this._pendingRequests = [];
     },
-    'isConsentGranted': function() {
-      return this._consentGranted;
+    'isPublishingConsentGranted': function() {
+      return this._publishingConsentGranted;
     }
   };
 }
