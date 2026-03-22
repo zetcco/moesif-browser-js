@@ -392,6 +392,46 @@ in, it will try to restart capturing using the global `web3` object. Return `tru
 moesif.useWeb3(myWeb3Object);
 ```
 
+#### grantPublishingConsent, () => void
+
+Call this method when the user grants consent to send data to Moesif. This will:
+- Flush all queued events to Moesif servers
+- Clear the local queue after successful delivery
+- Allow future events to be sent immediately
+
+```javascript
+// When user clicks "Accept Cookies" or "Accept Tracking"
+moesif.grantPublishingConsent();
+```
+
+Refer [Consent Management](#consent-management) more details.
+
+#### revokePublishingConsent, () => void
+
+Call this method when the user revokes consent. This will:
+- Stop sending new events to Moesif
+- Clear any queued events
+- Start queuing new events locally again (if recording is active)
+
+```javascript
+// When user clicks "Revoke Consent" or "Opt Out"
+moesif.revokePublishingConsent();
+```
+Refer [Consent Management](#consent-management) more details.
+
+#### isPublishingConsentGranted, () => boolean
+
+Returns `true` if consent to publish has been granted, `false` otherwise.
+
+```javascript
+if (moesif.isPublishingConsentGranted()) {
+  console.log('User has granted consent to publish data');
+} else {
+  console.log('User has not granted consent yet');
+}
+```
+Refer [Consent Management](#consent-management) more details.
+
 ## Consent Management
 
 The Moesif SDK provides flexible consent management options to help you comply with privacy regulations like GDPR and CCPA. The SDK distinguishes between **consent to store data locally** and **consent to publish data to Moesif servers**.
@@ -417,81 +457,13 @@ If you want to **track user actions locally without sending data to Moesif until
 
 This is ideal when you want **zero data loss** while still respecting user privacy - all events are tracked locally and sent to Moesif only after the user explicitly consents.
 
-#### Configuration Options
-
-##### `requirePublishingConsent`, boolean, optional, default `false`
-
-When set to `true`, the SDK will queue all tracking events locally instead of sending them to Moesif. Events remain queued until `grantPublishingConsent()` is called.
-
-```javascript
-moesif.init({
-  applicationId: 'Your Publishable Moesif Application Id',
-  requirePublishingConsent: true, // Queue events locally until consent is granted
-  maxQueueSize: 1000 // Optional: Set queue size limit
-});
-```
-
-##### `maxQueueSize`, number, optional, default `1000`
-
-The maximum number of events that can be queued locally before consent is granted. When the queue reaches this limit:
-- The oldest event is dropped (FIFO queue)
-- The newest event is added to the queue
-
-This prevents unbounded memory growth if a user never grants consent.
-
-```javascript
-moesif.init({
-  applicationId: 'Your Publishable Moesif Application Id',
-  requirePublishingConsent: true,
-  maxQueueSize: 500 // Limit queue to 500 events
-});
-```
-
-#### API Methods
-
-##### grantPublishingConsent, () => void
-
-Call this method when the user grants consent to send data to Moesif. This will:
-- Flush all queued events to Moesif servers
-- Clear the local queue after successful delivery
-- Allow future events to be sent immediately
-
-```javascript
-// When user clicks "Accept Cookies" or "Accept Tracking"
-moesif.grantPublishingConsent();
-```
-
-##### revokePublishingConsent, () => void
-
-Call this method when the user revokes consent. This will:
-- Stop sending new events to Moesif
-- Clear any queued events
-- Start queuing new events locally again (if recording is active)
-
-```javascript
-// When user clicks "Revoke Consent" or "Opt Out"
-moesif.revokePublishingConsent();
-```
-
-##### isPublishingConsentGranted, () => boolean
-
-Returns `true` if consent to publish has been granted, `false` otherwise.
-
-```javascript
-if (moesif.isPublishingConsentGranted()) {
-  console.log('User has granted consent to publish data');
-} else {
-  console.log('User has not granted consent yet');
-}
-```
-
 ### How It Works
 
 When `requirePublishingConsent: true` is set:
 
 1. **Before Consent:**
    - All `track()` calls, `identifyUser()`, `identifyCompany()`, and API events are queued locally
-   - Queue is persisted to **localStorage only** (NOT cookies) and survives page refreshes
+   - Queue is persisted to **localStorage only** (not on cookies) and survives page refreshes
    - **Note:** If `persistence: 'cookie'` mode is used, the queue will NOT persist across page refreshes (in-memory only)
    - Cross-domain tracking links are NOT decorated (no anonymousId in URLs)
    - Queue follows FIFO (First-In-First-Out) - oldest events dropped when limit reached
@@ -510,6 +482,7 @@ When `requirePublishingConsent: true` is set:
 4. **Recording Control with [`start()`](#start--null) and [`stop()`](#stop--null):**
    - These methods work the same way as described in their respective documentation, the only difference is when consent is not granted, events are queued up locally instead of being sent immediately to Moesif.
    - See [`start()`](#start--null) and [`stop()`](#stop--null) for full details
+Refer [API Methods](#list-of-methods-on-the-moesif-object) for details on each methods.
 
 ### State Management: Developer Responsibility
 
@@ -769,6 +742,36 @@ var options = {
 };
 
 moesif.init(options);
+```
+
+### Publishing Consent Configurations
+
+#### `requirePublishingConsent`, boolean, optional, default `false`
+
+When set to `true`, the SDK will queue all tracking events locally instead of sending them to Moesif. Events remain queued until `grantPublishingConsent()` is called.
+
+```javascript
+moesif.init({
+  applicationId: 'Your Publishable Moesif Application Id',
+  requirePublishingConsent: true, // Queue events locally until consent is granted
+  maxQueueSize: 1000 // Optional: Set queue size limit
+});
+```
+
+#### `maxQueueSize`, number, optional, default `1000`
+
+The maximum number of events that can be queued locally before consent is granted. When the queue reaches this limit:
+- The oldest event is dropped (FIFO queue)
+- The newest event is added to the queue
+
+This prevents unbounded memory growth if a user never grants consent.
+
+```javascript
+moesif.init({
+  applicationId: 'Your Publishable Moesif Application Id',
+  requirePublishingConsent: true,
+  maxQueueSize: 500 // Limit queue to 500 events
+});
 ```
 
 ## Ethereum DApp support
