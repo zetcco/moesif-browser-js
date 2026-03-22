@@ -272,6 +272,177 @@ function decorateMoesifCdtUrl(url) {
 
 ---
 
+
+## Consent Management
+
+The Moesif SDK provides flexible consent management options to help you comply with privacy regulations like GDPR and CCPA. The SDK distinguishes between **consent to store data locally** and **consent to publish data to Moesif servers**.
+
+### Important: Cookies Created on Init
+
+**⚠️ Cookies and localStorage may be created as soon as the SDK is initialized (`init()`), regardless of the user's consent status.**
+
+If your compliance requirements mandate that **no cookies or storage are created before consent is obtained**, you must:
+1. **Defer SDK initialization** until after the user grants consent
+2. **Call `moesif.init()`** only after consent is granted
+
+This is the recommended approach for strict "consent-first" implementations where no tracking data can be stored locally before user consent.
+
+### Consent for Publishing (`requirePublishingConsent`)
+
+If you want to **track user actions locally without sending data to Moesif until consent is granted**, use the `requirePublishingConsent` option. This approach allows you to:
+
+- Track all user actions and API calls without any loss of data
+- Store tracked events locally in a queue (persisted to localStorage only, NOT cookies)
+- Automatically flush the queue to Moesif when consent is granted
+- Continue tracking seamlessly across page refreshes (when using default `localStorage` persistence mode)
+
+This is ideal when you want **zero data loss** while still respecting user privacy - all events are tracked locally and sent to Moesif only after the user explicitly consents.
+
+### How It Works
+
+When `requirePublishingConsent: true` is set:
+
+1. **Before Consent:**
+   - All `track()` calls, `identifyUser()`, `identifyCompany()`, and API events are queued locally
+   - Queue is persisted to **localStorage only** (not on cookies) and survives page refreshes
+   - **Note:** If `persistence: 'cookie'` mode is used, the queue will NOT persist across page refreshes (in-memory only)
+   - Cross-domain tracking links are NOT decorated (no anonymousId in URLs)
+   - Queue follows FIFO (First-In-First-Out) - oldest events dropped when limit reached
+
+2. **After `grantPublishingConsent()` is called:**
+   - All queued events are immediately sent to Moesif
+   - Local queue is cleared after successful delivery
+   - Future events are sent to Moesif immediately
+   - Cross-domain tracking links are decorated with anonymousId
+
+3. **After `revokePublishingConsent()` is called:**
+   - Consent state is revoked
+   - Any queued events are cleared
+   - New events start queuing locally again
+
+4. **Recording Control with [`start()`](#start--null) and [`stop()`](#stop--null):**
+   - These methods work the same way as described in their respective documentation, the only difference is when consent is not granted, events are queued up locally instead of being sent immediately to Moesif.
+   - See [`start()`](#start--null) and [`stop()`](#stop--null) for full details
+Refer [API Methods](#list-of-methods-on-the-moesif-object) for details on each methods.
+
+### State Management: Developer Responsibility
+
+**⚠️ Important:** The SDK does **NOT** persist the following states:
+- Whether `init()` has been called
+- Whether consent has been granted via `grantPublishingConsent()`
+
+You (the developer) are responsible for:
+1. **Managing initialization state** - Track whether you've called `init()`
+2. **Managing consent state** - Store the user's consent decision in your own storage
+3. **Restoring state on page load** - Check your stored consent state and call `grantPublishingConsent()` if needed
+
+#### Example: State Management Implementation
+
+```javascript
+// On page load
+document.addEventListener('DOMContentLoaded', function() {
+  // Initialize SDK (this creates cookies/localStorage)
+  moesif.init({
+    applicationId: 'Your Publishable Moesif Application Id',
+    requirePublishingConsent: true
+  });
+
+  // Check your stored consent state (example using localStorage)
+  const hasConsented = localStorage.getItem('user_tracking_consent') === 'granted';
+
+  if (hasConsented) {
+    // User previously granted consent, restore it
+    moesif.grantPublishingConsent();
+  }
+
+  // Start tracking API calls and user actions
+  moesif.start();
+});
+
+// When user grants consent
+function handleConsentAccepted() {
+  // Store consent decision in YOUR storage
+  localStorage.setItem('user_tracking_consent', 'granted');
+
+  // Grant consent in Moesif SDK
+  moesif.grantPublishingConsent();
+}
+
+// When user revokes consent
+function handleConsentRevoked() {
+  // Update consent decision in YOUR storage
+  localStorage.setItem('user_tracking_consent', 'revoked');
+
+  // Revoke consent in Moesif SDK
+  moesif.revokePublishingConsent();
+}
+```
+
+### Example: Complete Consent Flow
+
+```javascript
+// 1. Initialize with consent required
+moesif.init({
+  applicationId: 'Your Publishable Moesif Application Id',
+  requirePublishingConsent: true,
+  maxQueueSize: 1000
+});
+
+// 2. Start recording (events will be queued, not sent)
+moesif.start();
+
+// 3. Track events (queued locally)
+moesif.track('viewed_homepage');
+moesif.identifyUser('user_123');
+
+// 4. When user grants consent
+moesif.grantPublishingConsent();
+// Now all queued events are sent to Moesif
+
+// 5. Continue tracking (sent immediately)
+moesif.track('clicked_cta');
+
+// 6. If user later revokes consent
+moesif.revokePublishingConsent();
+// Future events will be queued again (not sent)
+```
+
+### Strict Compliance Mode: Defer Init Until Consent
+
+For strict compliance where **no cookies or storage can be created before consent**:
+
+```javascript
+// Wait for user consent before initializing
+document.addEventListener('DOMContentLoaded', function() {
+  // Check if user has already granted consent
+  const hasConsented = localStorage.getItem('user_tracking_consent') === 'granted';
+
+  if (hasConsented) {
+    // User previously consented, safe to initialize
+    initializeMoesif();
+  } else {
+    // Show consent banner
+    showConsentBanner();
+  }
+});
+
+function initializeMoesif() {
+  moesif.init({
+    applicationId: 'Your Publishable Moesif Application Id'
+  });
+  moesif.start();
+
+  // Track events immediately (they go to Moesif right away)
+  moesif.track('session_started');
+}
+
+function handleConsentAccepted() {
+  localStorage.setItem('user_tracking_consent', 'granted');
+  initializeMoesif(); // Initialize only after consent
+  hideConsentBanner();
+}
+```
+
 ## List of Methods on the `moesif` Object
 
 #### init, (obj) => null
@@ -318,7 +489,7 @@ moesif.identifyCompany("67890", metadata, "acmeinc.com");
 
 #### track, (string, object) => null
 
-Track user actions such as "clicked sign up" or "made a purchase". By tracking user actions in addition to API usage via one of the [Moesif server SDKs](https://www.moesif.com/implementation), you'll be able to understand the entire customer journey from inital sign up to first API call. First argument is an action name as a string, which is required. Second parameter is an optional metadata object related to this action event. [See API Reference](https://www.moesif.com/docs/api#track-a-user-action)
+Track user actions such as "clicked sign up" or "made a purchase". By tracking user actions in addition to API usage via one of the [Moesif server SDKs](https://www.moesif.com/implementation), you'll be able to understand the entire customer journey from initial sign up to first API call. First argument is an action name as a string, which is required. Second parameter is an optional metadata object related to this action event. [See API Reference](https://www.moesif.com/docs/api#track-a-user-action)
 
 ```javascript
 moesif.track('clicked_sign_up', {
@@ -432,175 +603,6 @@ if (moesif.isPublishingConsentGranted()) {
 ```
 Refer [Consent Management](#consent-management) more details.
 
-## Consent Management
-
-The Moesif SDK provides flexible consent management options to help you comply with privacy regulations like GDPR and CCPA. The SDK distinguishes between **consent to store data locally** and **consent to publish data to Moesif servers**.
-
-### Important: Cookies Created on Init
-
-**⚠️ Cookies and localStorage may be created as soon as the SDK is initialized (`init()`), regardless of the user's consent status.**
-
-If your compliance requirements mandate that **no cookies or storage are created before consent is obtained**, you must:
-1. **Defer SDK initialization** until after the user grants consent
-2. **Call `moesif.init()`** only after consent is granted
-
-This is the recommended approach for strict "consent-first" implementations where no tracking data can be stored locally before user consent.
-
-### Consent for Publishing (`requirePublishingConsent`)
-
-If you want to **track user actions locally without sending data to Moesif until consent is granted**, use the `requirePublishingConsent` option. This approach allows you to:
-
-- Track all user actions and API calls without any loss of data
-- Store tracked events locally in a queue (persisted to localStorage only, NOT cookies)
-- Automatically flush the queue to Moesif when consent is granted
-- Continue tracking seamlessly across page refreshes (when using default `localStorage` persistence mode)
-
-This is ideal when you want **zero data loss** while still respecting user privacy - all events are tracked locally and sent to Moesif only after the user explicitly consents.
-
-### How It Works
-
-When `requirePublishingConsent: true` is set:
-
-1. **Before Consent:**
-   - All `track()` calls, `identifyUser()`, `identifyCompany()`, and API events are queued locally
-   - Queue is persisted to **localStorage only** (not on cookies) and survives page refreshes
-   - **Note:** If `persistence: 'cookie'` mode is used, the queue will NOT persist across page refreshes (in-memory only)
-   - Cross-domain tracking links are NOT decorated (no anonymousId in URLs)
-   - Queue follows FIFO (First-In-First-Out) - oldest events dropped when limit reached
-
-2. **After `grantPublishingConsent()` is called:**
-   - All queued events are immediately sent to Moesif
-   - Local queue is cleared after successful delivery
-   - Future events are sent to Moesif immediately
-   - Cross-domain tracking links are decorated with anonymousId
-
-3. **After `revokePublishingConsent()` is called:**
-   - Consent state is revoked
-   - Any queued events are cleared
-   - New events start queuing locally again
-
-4. **Recording Control with [`start()`](#start--null) and [`stop()`](#stop--null):**
-   - These methods work the same way as described in their respective documentation, the only difference is when consent is not granted, events are queued up locally instead of being sent immediately to Moesif.
-   - See [`start()`](#start--null) and [`stop()`](#stop--null) for full details
-Refer [API Methods](#list-of-methods-on-the-moesif-object) for details on each methods.
-
-### State Management: Developer Responsibility
-
-**⚠️ Important:** The SDK does **NOT** persist the following states:
-- Whether `init()` has been called
-- Whether consent has been granted via `grantPublishingConsent()`
-
-You (the developer) are responsible for:
-1. **Managing initialization state** - Track whether you've called `init()` 
-2. **Managing consent state** - Store the user's consent decision in your own storage
-3. **Restoring state on page load** - Check your stored consent state and call `grantPublishingConsent()` if needed
-
-#### Example: State Management Implementation
-
-```javascript
-// On page load
-document.addEventListener('DOMContentLoaded', function() {
-  // Initialize SDK (this creates cookies/localStorage)
-  moesif.init({
-    applicationId: 'Your Publishable Moesif Application Id',
-    requirePublishingConsent: true
-  });
-
-  // Check your stored consent state (example using localStorage)
-  const hasConsented = localStorage.getItem('user_tracking_consent') === 'granted';
-  
-  if (hasConsented) {
-    // User previously granted consent, restore it
-    moesif.grantPublishingConsent();
-  }
-
-  // Start tracking API calls and user actions
-  moesif.start();
-});
-
-// When user grants consent
-function handleConsentAccepted() {
-  // Store consent decision in YOUR storage
-  localStorage.setItem('user_tracking_consent', 'granted');
-  
-  // Grant consent in Moesif SDK
-  moesif.grantPublishingConsent();
-}
-
-// When user revokes consent
-function handleConsentRevoked() {
-  // Update consent decision in YOUR storage
-  localStorage.setItem('user_tracking_consent', 'revoked');
-  
-  // Revoke consent in Moesif SDK
-  moesif.revokePublishingConsent();
-}
-```
-
-### Example: Complete Consent Flow
-
-```javascript
-// 1. Initialize with consent required
-moesif.init({
-  applicationId: 'Your Publishable Moesif Application Id',
-  requirePublishingConsent: true,
-  maxQueueSize: 1000
-});
-
-// 2. Start recording (events will be queued, not sent)
-moesif.start();
-
-// 3. Track events (queued locally)
-moesif.track('viewed_homepage');
-moesif.identifyUser('user_123');
-
-// 4. When user grants consent
-moesif.grantPublishingConsent();
-// Now all queued events are sent to Moesif
-
-// 5. Continue tracking (sent immediately)
-moesif.track('clicked_cta');
-
-// 6. If user later revokes consent
-moesif.revokePublishingConsent();
-// Future events will be queued again (not sent)
-```
-
-### Strict Compliance Mode: Defer Init Until Consent
-
-For strict compliance where **no cookies or storage can be created before consent**:
-
-```javascript
-// Wait for user consent before initializing
-document.addEventListener('DOMContentLoaded', function() {
-  // Check if user has already granted consent
-  const hasConsented = localStorage.getItem('user_tracking_consent') === 'granted';
-  
-  if (hasConsented) {
-    // User previously consented, safe to initialize
-    initializeMoesif();
-  } else {
-    // Show consent banner
-    showConsentBanner();
-  }
-});
-
-function initializeMoesif() {
-  moesif.init({
-    applicationId: 'Your Publishable Moesif Application Id'
-  });
-  moesif.start();
-  
-  // Track events immediately (they go to Moesif right away)
-  moesif.track('session_started');
-}
-
-function handleConsentAccepted() {
-  localStorage.setItem('user_tracking_consent', 'granted');
-  initializeMoesif(); // Initialize only after consent
-  hideConsentBanner();
-}
-```
 
 ## Configuration options
 
@@ -743,8 +745,6 @@ var options = {
 
 moesif.init(options);
 ```
-
-### Publishing Consent Configurations
 
 #### `requirePublishingConsent`, boolean, optional, default `false`
 
